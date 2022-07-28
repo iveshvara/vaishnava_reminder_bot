@@ -38,7 +38,7 @@ async def on_startup(_):
         'CREATE TABLE IF NOT EXISTS users(id_user INTEGER, first_name TEXT, last_name TEXT, '
             'username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, '
             'address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, '
-            'caturmasya_system TEXT)')
+            'caturmasya_system TEXT, notification_time TEXT, only_fasting BLOB)')
     connect.execute(
         'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
@@ -128,8 +128,8 @@ async def now_we_have_id_user(message: Message):
     if result is None:
         caturmasya_system = 'PURNIMA'
         cursor.execute(
-            'INSERT INTO users (id_user, first_name, last_name, username, language_code, latitude, longitude, address, country, area, city, uts, uts_summer, caturmasya_system) '
-            f'VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 0, 0, "", "", "", "", 0, 0, "{caturmasya_system}")')
+            'INSERT INTO users (id_user, first_name, last_name, username, language_code, latitude, longitude, address, country, area, city, uts, uts_summer, caturmasya_system, notification_time, only_fasting) '
+            f'VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 0, 0, "", "", "", "", 0, 0, "{caturmasya_system}", "18:00", True)')
     else:
         cursor.execute(f'UPDATE users SET first_name = "{first_name}", last_name = "{last_name}", '
                        f'username = "{username}", language_code = "{language_code}" WHERE id_user = {id_user}')
@@ -279,21 +279,21 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
 
 def get_moon_icon(tithi_index):
     #'🌕🌖🌗🌘🌑🌒🌓🌔'
-    if tithi_index >= 29:
+    if tithi_index > 29 or tithi_index == 1:
         return '🌕'
-    elif 1 <= tithi_index < 7:
+    elif 2 <= tithi_index < 7:
         return '🌖'
     elif 7 <= tithi_index < 10:
         return '🌗'
-    elif 10 <= tithi_index < 16:
+    elif 10 <= tithi_index < 15:
         return '🌘'
-    elif tithi_index == 16:
+    elif tithi_index == 15:
         return '🌑'
-    elif 17 <= tithi_index < 22:
+    elif 16 <= tithi_index < 22:
         return '🌒'
     elif 22 <= tithi_index < 25:
         return '🌓'
-    elif 25 <= tithi_index < 29:
+    elif 25 <= tithi_index < 30:
         return '🌔'
 
 
@@ -329,16 +329,18 @@ async def display_calendar(id_user, year, month, day):
     month_back = add_months(selected_day, -1)
     month_next = add_months(selected_day, 1)
 
-    cb_back = f'callendar {id_user} {month_back.year} {month_back.month} {1}'
-    cb_today = f'callendar {id_user} {today.year} {today.month} {today.day}'
-    cb_next = f'callendar {id_user} {month_next.year} {month_next.month} {1}'
+    cb_back = f'callendar {month_back.year} {month_back.month} {1}'
+    cb_today = f'callendar {today.year} {today.month} {today.day}'
+    cb_next = f'callendar {month_next.year} {month_next.month} {1}'
+
+    cb_selected_day = f'settings_help {selected_day.year} {selected_day.month} {selected_day.day}'
 
     month_back_text = await translate(language_code, month_back.strftime('%B nominative case'))
     today_text = await translate(language_code, 'Today', False)
     month_next_text = await translate(language_code, month_next.strftime('%B nominative case'))
 
     inline_kb = InlineKeyboardMarkup(row_width=1)
-    inline_kb.row(InlineKeyboardButton(text='⚙ / ❔️', callback_data='settings_help'), #❓
+    inline_kb.row(InlineKeyboardButton(text='⚙ / ❔️', callback_data=cb_selected_day), #❓
                   InlineKeyboardButton(text=month_back_text, callback_data=cb_back),
                   InlineKeyboardButton(text=today_text, callback_data=cb_today),
                   InlineKeyboardButton(text=month_next_text, callback_data=cb_next))
@@ -385,7 +387,7 @@ async def display_calendar(id_user, year, month, day):
             inline_kb.row(*array_week)
             array_week = []
 
-        array_week.append(InlineKeyboardButton(text=text_button, callback_data=f'callendar {id_user} {date.year} {date.month} {date.day}'))
+        array_week.append(InlineKeyboardButton(text=text_button, callback_data=f'callendar {date.year} {date.month} {date.day}'))
 
     for ii in range(len(array_week), 7, 1):
         array_week.append(InlineKeyboardButton(text='-', callback_data='-'))
@@ -549,11 +551,12 @@ async def command_start(message: Message):
 
 @dp.callback_query_handler(lambda x: x.data and x.data.startswith('callendar '))
 async def menu_back(callback: CallbackQuery):
+    id_user = callback.from_user.id
+
     list_str = callback.data.split()
-    id_user = int(list_str[1])
-    year = int(list_str[2])
-    month = int(list_str[3])
-    day = int(list_str[4])
+    year = int(list_str[1])
+    month = int(list_str[2])
+    day = int(list_str[3])
 
     text, inline_kb = await display_calendar(id_user, year, month, day)
 
@@ -645,6 +648,133 @@ async def handle_location(message: types.Message):
     text, inline_kb = await display_calendar(id_user, today.year, today.month, today.day)
 
     await message.answer(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+
+
+async def menu_settings(callback):
+    id_user = callback.from_user.id
+
+    list_str = callback.data.split()
+    year = int(list_str[1])
+    month = int(list_str[2])
+    day = int(list_str[3])
+
+    cb_back_to_calendar = f'{year} {month} {day}'
+
+    cursor.execute(f'SELECT * FROM users WHERE id_user = {id_user}')
+    result = cursor.fetchone()
+    language_code = result[4]
+    latitude = result[5]
+    longitude = result[6]
+    address = result[7]
+    country = result[8]
+    area = result[9]
+    city = result[10]
+    uts = result[11]
+    uts_summer = result[12]
+    caturmasya_system = result[13]
+    notification_time = result[14]
+    only_fasting = result[15]
+
+    text = 'qwe'
+
+    caturmasya_title = await translate(language_code, 'Caturmasya')
+    caturmasya_value = await translate(language_code, caturmasya_system)
+    only_fasting_text = await translate(language_code, 'only_fasting_' + str(only_fasting))
+    notification_time_text = await translate(language_code, 'Notification Time')
+
+    inline_kb = InlineKeyboardMarkup(row_width=1)
+    inline_kb.row(InlineKeyboardButton(text='<<', callback_data='callendar ' + cb_back_to_calendar), # ❓
+                  InlineKeyboardButton(text='❔️', callback_data='help'))
+    inline_kb.add(InlineKeyboardButton(text=caturmasya_title + ': ' + caturmasya_value, callback_data='caturmasya_system ' + cb_back_to_calendar))
+    inline_kb.add(InlineKeyboardButton(text=notification_time_text + ': ' + notification_time, callback_data='notification_time ' + cb_back_to_calendar))
+    inline_kb.add(InlineKeyboardButton(text=only_fasting_text, callback_data='only_fasting ' + cb_back_to_calendar))
+
+    return text, inline_kb
+
+
+@dp.callback_query_handler(lambda x: x.data and x.data.startswith('settings_help '))
+async def menu_settings_help(callback: CallbackQuery):
+
+    text, inline_kb = await menu_settings(callback)
+
+    try:
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+    except:
+        pass
+
+
+@dp.callback_query_handler(lambda x: x.data and x.data.startswith('caturmasya_system '))
+async def menu_caturmasya_system(callback: CallbackQuery):
+    id_user = callback.from_user.id
+
+    cursor.execute(f'SELECT caturmasya_system FROM users WHERE id_user = {id_user}')
+    result = cursor.fetchone()
+    caturmasya_system = result[0]
+    if caturmasya_system == 'PURNIMA':
+        caturmasya_system = 'PRATIPAT'
+    elif caturmasya_system == 'PRATIPAT':
+        caturmasya_system = 'EKADASI'
+    elif caturmasya_system == 'EKADASI':
+        caturmasya_system = 'PURNIMA'
+
+    cursor.execute(f'UPDATE users SET caturmasya_system = "{caturmasya_system}" WHERE id_user = {id_user}')
+    connect.commit()
+
+    text, inline_kb = await menu_settings(callback)
+
+    try:
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+    except:
+        pass
+
+
+@dp.callback_query_handler(lambda x: x.data and x.data.startswith('notification_time '))
+async def menu_notification_time(callback: CallbackQuery):
+    id_user = callback.from_user.id
+
+    cursor.execute(f'SELECT notification_time FROM users WHERE id_user = {id_user}')
+    result = cursor.fetchone()
+    notification_time = int(result[0][:2])
+    notification_time += 2
+    if 0 <= notification_time < 10:
+        notification_time_text = f'0{notification_time}:00'
+    elif 10 <= notification_time < 24:
+        notification_time_text = f'{notification_time}:00'
+    else:
+        notification_time_text = '00:00'
+
+    cursor.execute(f'UPDATE users SET notification_time = "{notification_time_text}" WHERE id_user = {id_user}')
+    connect.commit()
+
+    text, inline_kb = await menu_settings(callback)
+
+    try:
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+    except:
+        pass
+
+
+@dp.callback_query_handler(lambda x: x.data and x.data.startswith('only_fasting '))
+async def menu_only_fasting(callback: CallbackQuery):
+    id_user = callback.from_user.id
+
+    cursor.execute(f'SELECT only_fasting FROM users WHERE id_user = {id_user}')
+    result = cursor.fetchone()
+    only_fasting = result[0]
+    if only_fasting:
+        only_fasting = False
+    else:
+        only_fasting = True
+
+    cursor.execute(f'UPDATE users SET only_fasting = {only_fasting} WHERE id_user = {id_user}')
+    connect.commit()
+
+    text, inline_kb = await menu_settings(callback)
+
+    try:
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+    except:
+        pass
 
 
 @dp.message_handler(state=StatesInput.name)
