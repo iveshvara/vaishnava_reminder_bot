@@ -5,6 +5,7 @@ from aiogram import types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.utils.markdown import link
 
 import requests
 from geopy.geocoders import Yandex
@@ -39,7 +40,7 @@ async def on_startup(_):
             'address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, '
             'caturmasya_system TEXT)')
     connect.execute(
-        'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT)')
+        'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
         'CREATE TABLE IF NOT EXISTS calendars(id_user INTEGER, name TEXT, gyear INTEGER, '
             'date TEXT, dayweekid INTEGER, dayweek TEXT, '
@@ -80,15 +81,21 @@ def string_to_date(date_text='', time_text=''):
 
 
 async def translate(language_code, mark, need_shielding=True):
-    cursor.execute(f'SELECT text FROM translations WHERE language_code = "{language_code}" AND mark = "{mark}"')
+    cursor.execute(f'SELECT text, link FROM translations WHERE language_code = "{language_code}" AND mark = "{mark}"')
     result = cursor.fetchone()
     if result is None:
         return mark
     else:
-        answer = result[0]
+        text = result[0]
+        link_text = result[1]
+
         if need_shielding:
-            answer = shielding(answer)
-        return answer
+            text = shielding(text)
+
+        if link_text is not None and len(link_text) > 0:
+            text = link(text, link_text) #[hyperlink](https://google.com)
+
+        return text
 
 
 async def translate_data(language_code, data, format_date):
@@ -156,12 +163,6 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
     dst = '3x0x5x0x11x0x1x0' #'0x0x0x0x0x0x0x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
 
     # gcal_cgi.exe "q=calendar&lc=Sevastopol&la=44.616604&lo=33.525369&ty=2019&tm=1&td=1&tc=4018&lt=3E00&dst=0x0x0x0x0x0x0x0" > name_file.xml
-
-    # file_name = rf'./{str(round(time.time() * 1000))}' + '.xml'
-    # cmd = fr'./gcal/gcal_cgi.exe "q=calendar' \
-    #       fr'&la={latitude}&lo={longitude}&lt={lt}' \
-    #       fr'&ty={ty}&tm={tm}&td={td}&tc={tc}&dst={dst}" > ' \
-    #       fr'{file_name}'
     file_name = rf'{str(round(time.time() * 1000))}' + '.xml'
     cmd = fr'gcal\gcal_cgi.exe "q=calendar&la={latitude}&lo={longitude}&lt={lt}'\
           fr'&ty={ty}&tm={tm}&td={td}&tc={tc}&dst={dst}" > {file_name}'
@@ -183,8 +184,6 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
         masa_name = await translate(language_code, masa['@name'])
         gyear = masa['@gyear']
         gyear_list = gyear.split(' ')
-        # gyear_name = await translate(language_code, gyear_list[0])
-        # masa_gyear = gyear_name + ' ' + gyear_list[1]
         masa_gyear = int(gyear_list[1])
 
         for day in masa['day']:
@@ -275,12 +274,6 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
         if len(festivals) > 0:
             cursor.executemany('INSERT INTO festivals (id_user, date, name, class) VALUES (?, ?, ?, ?)', festivals)
 
-        # cursor.execute(f'SELECT start_date, end_date FROM users WHERE id_user = {id_user}')
-        # result = cursor.fetchone()
-        # start_date = min(start_date, datetime.datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S'))
-        # end_date = max(end_date, datetime.datetime.strptime(result[1], '%Y-%m-%d %H:%M:%S'))
-        # cursor.execute(f'UPDATE users SET start_date = "{start_date}", end_date = "{end_date}" WHERE id_user = {id_user}')
-
         connect.commit()
 
 
@@ -345,7 +338,7 @@ async def display_calendar(id_user, year, month, day):
     month_next_text = await translate(language_code, month_next.strftime('%B nominative case'))
 
     inline_kb = InlineKeyboardMarkup(row_width=1)
-    inline_kb.row(InlineKeyboardButton(text='⚙ / ❓️', callback_data='settings_help'),
+    inline_kb.row(InlineKeyboardButton(text='⚙ / ❔️', callback_data='settings_help'), #❓
                   InlineKeyboardButton(text=month_back_text, callback_data=cb_back),
                   InlineKeyboardButton(text=today_text, callback_data=cb_today),
                   InlineKeyboardButton(text=month_next_text, callback_data=cb_next))
@@ -404,6 +397,7 @@ async def display_calendar(id_user, year, month, day):
 
     start_date = datetime.datetime(year, 1, 1)
     end_date = datetime.datetime(year, 12, 31)
+
     cursor.execute(f'''SELECT caturmasya1.date AS start_day, caturmasya2.date, caturmasya1.month AS end_day 
                     FROM caturmasya AS caturmasya1 LEFT JOIN caturmasya AS caturmasya2 
                    ON caturmasya1.id_user = caturmasya2.id_user AND caturmasya1.month = caturmasya2.month 
@@ -413,10 +407,11 @@ async def display_calendar(id_user, year, month, day):
                    AND caturmasya1.date BETWEEN "{start_date}" AND "{end_date}" 
                    AND caturmasya2.date BETWEEN "{start_date}" AND "{end_date}"''')
     result_caturmasya = cursor.fetchall()
+
     for caturmasya_line in result_caturmasya:
         start_date = datetime.datetime.strptime(caturmasya_line[0], '%Y-%m-%d %H:%M:%S')
         end_date = datetime.datetime.strptime(caturmasya_line[1], '%Y-%m-%d %H:%M:%S')
-        # Caturmasya
+
         caturmasya_text = ''
         if selected_day_time == start_date:
            caturmasya_text = await translate(language_code, 'Caturmasya_beginning_of_month', False)
@@ -437,8 +432,6 @@ async def display_calendar(id_user, year, month, day):
             else:
                 caturmasya_icon = '📜'
 
-            # caturmasya_text = caturmasya_text.format(caturmasya_month, kartika,
-            #     start_date.strftime('%d\.%m\.%Y'), end_date.strftime('%d\.%m\.%Y'))
             caturmasya_text = caturmasya_text.format(caturmasya_month, kartika,
                 await translate_data(language_code, start_date, '%d %B'),
                 await translate_data(language_code, end_date, '%d %B'))
@@ -478,8 +471,8 @@ async def display_calendar(id_user, year, month, day):
         event_text += f'\n{end_the_fast}: {parana_from[11:16]} \- {parana_to[11:16]}'
 
     festivals_text = ''
+    event_icon = '🏵'
     if event < 10:
-        event_icon = '🏵'
         if event == -1 and tithi_index in (11, 12, 26, 27):
             event_icon = ' 📿 '
 
@@ -643,10 +636,8 @@ async def handle_location(message: types.Message):
         uts_text = '\- ' + uts_text
     uts_text += ' UTC'
 
-    # cursor.execute(f'SELECT text FROM translations WHERE language_code = "{language_code}" AND mark = "location confirmation"')
-    # result = cursor.fetchone()
     result = await translate(language_code, 'location confirmation', False)
-    text = result[0].format(country, city, uts_text)
+    text = result.format(country, city, uts_text)
 
     await message.answer(text, parse_mode='MarkdownV2', reply_markup=types.ReplyKeyboardRemove())
 

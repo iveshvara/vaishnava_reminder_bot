@@ -1,2 +1,2 @@
-# Pythagorean_Square_bot
- This bot calculates the Pythagorean square (psychomatrix) by date of birth
+# vaishnava_reminder_bot
+ This bot is written for followers of Gaudiya Vaishnavism, to remind about important events and holidays.
