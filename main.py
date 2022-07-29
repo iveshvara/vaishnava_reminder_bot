@@ -176,7 +176,6 @@ async def menu_settings(callback):
 
     text = 'qwe'
 
-    change_language = await translate(language_code, 'Change language')
     caturmasya_title = await translate(language_code, 'Caturmasya')
     caturmasya_value = await translate(language_code, caturmasya_system)
     only_fasting_text = await translate(language_code, 'only_fasting_' + str(only_fasting))
@@ -188,7 +187,6 @@ async def menu_settings(callback):
     inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code us ' + cb_back_to_calendar),
                   InlineKeyboardButton(text='🇧🇬', callback_data='settings_answer language_code ru ' + cb_back_to_calendar),
                   InlineKeyboardButton(text='🇺🇦', callback_data='settings_answer language_code ua ' + cb_back_to_calendar))
-    inline_kb.add(InlineKeyboardButton(text=change_language, callback_data='settings change_language ' + cb_back_to_calendar))
     inline_kb.add(InlineKeyboardButton(text=caturmasya_title + ': ' + caturmasya_value, callback_data='settings caturmasya_system ' + cb_back_to_calendar))
     inline_kb.add(InlineKeyboardButton(text=notification_time_text + ': ' + notification_time, callback_data='settings notification_time ' + cb_back_to_calendar))
     inline_kb.add(InlineKeyboardButton(text=only_fasting_text, callback_data='settings only_fasting ' + cb_back_to_calendar))
@@ -718,36 +716,29 @@ async def menu_settings_help(callback: CallbackQuery):
     cb_date = f'{year} {month} {day}'
     inline_kb = InlineKeyboardMarkup(row_width=1)
 
-    if command == 'change_language':
-        text = await translate(language_code, 'Change language')
-
-        inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code us ' + cb_date),
-                      InlineKeyboardButton(text='🇧🇬', callback_data='settings_answer language_code ru ' + cb_date),
-                      InlineKeyboardButton(text='🇺🇦', callback_data='settings_answer language_code ua ' + cb_date))
-
-    elif command == 'caturmasya_system':
-        text = await translate(language_code, 'Caturmasya') \
-            + ' \(' + await translate(language_code, 'recommended') \
-            + ' ' + await translate(language_code, 'PURNIMA') + '\)'
-
-        inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'PURNIMA'), callback_data='settings_answer caturmasya_system PURNIMA ' + cb_date))
-        inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'PRATIPAT'), callback_data='settings_answer caturmasya_system PRATIPAT ' + cb_date))
-        inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'EKADASI'), callback_data='settings_answer caturmasya_system EKADASI ' + cb_date))
-
-        # cursor.execute(f'SELECT caturmasya_system FROM users WHERE id_user = {id_user}')
-        # result = cursor.fetchone()
-        # caturmasya_system = result[0]
-        # if caturmasya_system == 'PURNIMA':
-        #     caturmasya_system = 'PRATIPAT'
-        # elif caturmasya_system == 'PRATIPAT':
-        #     caturmasya_system = 'EKADASI'
-        # elif caturmasya_system == 'EKADASI':
-        #     caturmasya_system = 'PURNIMA'
+    if command == 'caturmasya_system':
+        # text = await translate(language_code, 'Caturmasya') \
+        #     + ' \(' + await translate(language_code, 'recommended') \
+        #     + ' ' + await translate(language_code, 'PURNIMA') + '\)'
         #
-        # cursor.execute(f'UPDATE users SET caturmasya_system = "{caturmasya_system}" WHERE id_user = {id_user}')
-        # connect.commit()
-        #
-        # text, inline_kb = await menu_settings(callback)
+        # inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'PURNIMA'), callback_data='settings_answer caturmasya_system PURNIMA ' + cb_date))
+        # inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'PRATIPAT'), callback_data='settings_answer caturmasya_system PRATIPAT ' + cb_date))
+        # inline_kb.add(InlineKeyboardButton(text=await translate(language_code, 'EKADASI'), callback_data='settings_answer caturmasya_system EKADASI ' + cb_date))
+
+        cursor.execute(f'SELECT caturmasya_system FROM users WHERE id_user = {id_user}')
+        result = cursor.fetchone()
+        caturmasya_system = result[0]
+        if caturmasya_system == 'PURNIMA':
+            caturmasya_system = 'PRATIPAT'
+        elif caturmasya_system == 'PRATIPAT':
+            caturmasya_system = 'EKADASI'
+        elif caturmasya_system == 'EKADASI':
+            caturmasya_system = 'PURNIMA'
+
+        cursor.execute(f'UPDATE users SET caturmasya_system = "{caturmasya_system}" WHERE id_user = {id_user}')
+        connect.commit()
+
+        text, inline_kb = await menu_settings(callback)
 
     elif command == 'notification_time':
         text = await translate(language_code, 'Notification Time')
@@ -822,97 +813,6 @@ async def menu_settings_help(callback: CallbackQuery):
         await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
     except:
         pass
-
-@dp.callback_query_handler(lambda x: x.data and x.data.startswith('1change_language '))
-async def menu_settings_help(callback: CallbackQuery):
-
-    text, inline_kb = await menu_settings(callback)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
-    except:
-        pass
-
-
-@dp.callback_query_handler(lambda x: x.data and x.data.startswith('1caturmasya_system '))
-async def menu_caturmasya_system(callback: CallbackQuery):
-    id_user = callback.from_user.id
-
-    cursor.execute(f'SELECT caturmasya_system FROM users WHERE id_user = {id_user}')
-    result = cursor.fetchone()
-    caturmasya_system = result[0]
-    if caturmasya_system == 'PURNIMA':
-        caturmasya_system = 'PRATIPAT'
-    elif caturmasya_system == 'PRATIPAT':
-        caturmasya_system = 'EKADASI'
-    elif caturmasya_system == 'EKADASI':
-        caturmasya_system = 'PURNIMA'
-
-    cursor.execute(f'UPDATE users SET caturmasya_system = "{caturmasya_system}" WHERE id_user = {id_user}')
-    connect.commit()
-
-    text, inline_kb = await menu_settings(callback)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
-    except:
-        pass
-
-
-@dp.callback_query_handler(lambda x: x.data and x.data.startswith('1notification_time '))
-async def menu_notification_time(callback: CallbackQuery):
-    id_user = callback.from_user.id
-
-    cursor.execute(f'SELECT notification_time FROM users WHERE id_user = {id_user}')
-    result = cursor.fetchone()
-    notification_time = int(result[0][:2])
-    notification_time += 2
-    if 0 <= notification_time < 10:
-        notification_time_text = f'0{notification_time}:00'
-    elif 10 <= notification_time < 24:
-        notification_time_text = f'{notification_time}:00'
-    else:
-        notification_time_text = '00:00'
-
-    cursor.execute(f'UPDATE users SET notification_time = "{notification_time_text}" WHERE id_user = {id_user}')
-    connect.commit()
-
-    text, inline_kb = await menu_settings(callback)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
-    except:
-        pass
-
-
-@dp.callback_query_handler(lambda x: x.data and x.data.startswith('1only_fasting '))
-async def menu_only_fasting(callback: CallbackQuery):
-    id_user = callback.from_user.id
-
-    cursor.execute(f'SELECT only_fasting FROM users WHERE id_user = {id_user}')
-    result = cursor.fetchone()
-    only_fasting = result[0]
-    if only_fasting:
-        only_fasting = False
-    else:
-        only_fasting = True
-
-    cursor.execute(f'UPDATE users SET only_fasting = {only_fasting} WHERE id_user = {id_user}')
-    connect.commit()
-
-    text, inline_kb = await menu_settings(callback)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
-    except:
-        pass
-
-
-@dp.callback_query_handler(text='1change_location')
-async def menu_change_location(callback: CallbackQuery):
-    text, keyboard = await menu_get_location(callback)
-    await callback.message.delete()
-    await callback.message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard)
 
 
 @dp.message_handler(state=StatesInput.name)
