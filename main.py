@@ -351,7 +351,7 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
 
 
 async def display_calendar(id_user, year, month, day):
-    #🎉🧘‍🦚
+    #🎉
     cursor.execute(f'SELECT * FROM users WHERE id_user = {id_user}')
     result = cursor.fetchone()
     language_code = result[4]
@@ -569,7 +569,7 @@ async def display_calendar(id_user, year, month, day):
 
     if not vyasapuji == '':
         vyasapuja_title = await translate(language_code, 'Vyasa-puja', True)
-        vyasapuji = '\n🦚 ' + vyasapuja_title + vyasapuji
+        vyasapuji = '\n🦚 *' + vyasapuja_title + ':* ' + vyasapuji
 
     event_text += vyasapuji
 
