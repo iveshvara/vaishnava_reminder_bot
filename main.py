@@ -1,3 +1,6 @@
+# Сделать дни рождения духовных учителей, как считать лунные др?
+# Сделать запрос о дате рождения и программу уведомлять о до соседей. Расстояние по координатам.
+
 from aiogram import Bot
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import Dispatcher, FSMContext
@@ -41,7 +44,7 @@ async def on_startup(_):
     connect.execute(
         'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
-        'CREATE TABLE IF NOT EXISTS calendars(id_user INTEGER, name TEXT, gyear INTEGER, '
+        'CREATE TABLE IF NOT EXISTS calendars(id_user INTEGER, masa_name TEXT, gyear INTEGER, '
             'date TEXT, dayweekid INTEGER, dayweek TEXT, '
             'sunrise_time TEXT, tithi_name TEXT, tithi_elapse NUMERIC, tithi_index INTEGER, '
             'naksatra_name TEXT, naksatra_elapse NUMERIC, '
@@ -50,10 +53,11 @@ async def on_startup(_):
             'arunodaya_time TEXT, arunodaya_tithi_name TEXT, '
             'noon_time TEXT, sunset_time TEXT, '
             'moon_rise TEXT, moon_set TEXT, '
-            'parana_from TEXT, parana_to TEXT, '
+            'parana_from TEXT, parana_to TEXT, parana_after TEXT, '
             'vriddhi_sd BLOB, event INTEGER)')
     connect.execute('CREATE TABLE IF NOT EXISTS festivals(id_user INTEGER, name TEXT, class INTEGER)')
     connect.execute('CREATE TABLE IF NOT EXISTS caturmasya(id_user INTEGER, day TEXT, month INTEGER, system TEXT)')
+    connect.execute('CREATE TABLE IF NOT EXISTS gurus(name TEXT, date TEXT, masa_name TEXT, tithi_index INTEGER)')
 
     connect.commit()
 
@@ -83,7 +87,10 @@ async def translate(language_code, mark, need_shielding=True):
     cursor.execute(f'SELECT text, link FROM translations WHERE language_code = "{language_code}" AND mark = "{mark}"')
     result = cursor.fetchone()
     if result is None:
-        return mark
+        if need_shielding:
+            return shielding(mark)
+        else:
+            return mark
     else:
         text = result[0]
         link_text = result[1]
@@ -217,7 +224,7 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
     ty = year
     tm = 1
     td = 1
-    tc = end_date - start_date
+    tc = (end_date - start_date).days + 1
 
     dst = '3x0x5x0x11x0x1x0' #'0x0x0x0x0x0x0x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
 
@@ -245,7 +252,11 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
         gyear_list = gyear.split(' ')
         masa_gyear = int(gyear_list[1])
 
-        for day in masa['day']:
+        days = masa['day']
+        if isinstance(days, dict):
+            days = (days,)
+
+        for day in days:
             date = string_to_date(day['@date'])
             sunrise = day['sunrise']
             sunrise_time = string_to_date(day['@date'], sunrise['@time'])
@@ -262,13 +273,16 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
             moon_rise = string_to_date(day['@date'], day['moon']['@rise'])
             moon_set = string_to_date(day['@date'], day['moon']['@set'])
 
+            parana_from = string_to_date()
+            parana_to = parana_from
+            parana_after = parana_from
             if 'parana' in day:
                 parana = day['parana']
-                parana_from = string_to_date(day['@date'], parana['@from'] + ':00')
-                parana_to = string_to_date(day['@date'], parana['@to'] + ':00')
-            else:
-                parana_from = string_to_date()
-                parana_to = parana_from
+                if '@after' in parana:
+                    parana_after = string_to_date(day['@date'], parana['@after'] + ':00')
+                else:
+                    parana_from = string_to_date(day['@date'], parana['@from'] + ':00')
+                    parana_to = string_to_date(day['@date'], parana['@to'] + ':00')
 
             if day['vriddhi']['@sd'] == 'yes':
                 vriddhi_sd = True
@@ -309,7 +323,7 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
                       naksatra_name, float(naksatra['@elapse']), yoga_name,
                       paksa['@id'], paksa_name, int(day['dst']['@offset']),
                       arunodaya_time, arunodaya_tithi_name,
-                      noon_time, sunset_time, moon_rise, moon_set, parana_from, parana_to, vriddhi_sd, event)
+                      noon_time, sunset_time, moon_rise, moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event)
 
             calendars.append(record)
 
@@ -320,12 +334,12 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
 
         if len(calendars) > 0:
             cursor.executemany(
-                'INSERT INTO calendars (id_user, name, gyear, date, dayweekid, dayweek, '
+                'INSERT INTO calendars (id_user, masa_name, gyear, date, dayweekid, dayweek, '
                 'sunrise_time, tithi_name, tithi_elapse, tithi_index, '
                 'naksatra_name, naksatra_elapse, yoga, paksa_id, '
                 'paksa_name, dst_offset, arunodaya_time, arunodaya_tithi_name, noon_time, sunset_time, moon_rise, '
-                'moon_set, parana_from, parana_to, vriddhi_sd, event) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', calendars)
+                'moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', calendars)
 
         if len(caturmasya) > 0:
             cursor.executemany('INSERT INTO caturmasya (id_user, date, day, month, system) VALUES (?, ?, ?, ?, ?)', caturmasya)
@@ -380,12 +394,23 @@ async def display_calendar(id_user, year, month, day):
     start_date = datetime.datetime.strptime(f'{selected_day.year}-{selected_day.month}-{1}', '%Y-%m-%d')
     end_date = start_date + datetime.timedelta(days=number_of_days-1)
 
-    cursor.execute(f'SELECT date, event FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
+    cursor.execute(f'SELECT * FROM gurus WHERE NOT date is null')
+    result = cursor.fetchall()
+    result_gurus = []
+    for i in result:
+        guru_name = await translate(language_code, i[0])
+        guru_date = datetime.datetime.strptime(i[1], '%Y-%m-%d %H:%M:%S')
+        guru_masa_name = await translate(language_code, i[2])
+        guru_tithi_index = int(i[3])
+        result_gurus.append((guru_name, guru_date, guru_masa_name, guru_tithi_index))
+
+    requisites = 'date, event, masa_name, tithi_index'
+    cursor.execute(f'SELECT {requisites} FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
     result = cursor.fetchall()
 
     if len(result) == 0:
         await fill_calendar(id_user, latitude, longitude, uts, year, month)
-        cursor.execute(f'SELECT date, event FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
+        cursor.execute(f'SELECT {requisites} FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
         result = cursor.fetchall()
 
     array_week = []
@@ -408,6 +433,14 @@ async def display_calendar(id_user, year, month, day):
             pass
         else:
             event_icon = '❕'
+
+        if event_icon == '':
+            masa_name = i[2]
+            tithi_index = i[3]
+            for ii in result_gurus:
+                if ii[2] == masa_name and ii[3] == tithi_index:
+                    event_icon = '❕'
+
         text_button = f'{text_day}{event_icon}'
 
         if len(array_week) == 0:
@@ -473,7 +506,7 @@ async def display_calendar(id_user, year, month, day):
     cursor.execute(f'SELECT * FROM calendars WHERE id_user = {id_user} AND date = "{selected_day_time}"')
     result = cursor.fetchone()
 
-    name = result[1]
+    masa_name = result[1]
     gyear = result[2]
     date = result[3]
     dayweekid = result[4]
@@ -496,14 +529,19 @@ async def display_calendar(id_user, year, month, day):
     moon_set = result[21]
     parana_from = result[22]
     parana_to = result[23]
-    vriddhi_sd = result[24]
-    event = result[25]
-
-    if not parana_from == '0001-01-01 00:00:00':
-        end_the_fast = await translate(language_code, 'End the fast')
-        event_text += f'\n{end_the_fast}: {parana_from[11:16]} \- {parana_to[11:16]}'
+    parana_after = result[24]
+    vriddhi_sd = result[25]
+    event = result[26]
 
     festivals_text = ''
+    if not parana_from == '0001-01-01 00:00:00':
+        end_the_fast = await translate(language_code, 'End the fast')
+        festivals_text += f'\n{end_the_fast}: {parana_from[11:16]} \- {parana_to[11:16]}'
+    elif not parana_after == '0001-01-01 00:00:00':
+        end_the_fast = await translate(language_code, 'End the fast')
+        after = await translate(language_code, 'after')
+        festivals_text += f'\n{end_the_fast}: {after} {parana_after[11:16]}'
+
     event_icon = '🏵'
     if event < 10:
         if event == -1 and tithi_index in (11, 12, 26, 27):
@@ -513,11 +551,27 @@ async def display_calendar(id_user, year, month, day):
         result_festival = cursor.fetchall()
 
         for festival in result_festival:
-            festivals_text += '\n' + await translate(language_code, festival[0])
+            festivals_name = festival[0]
+            if festivals_name[0] == '(':
+                next_line = ' '
+            else:
+                next_line = '\n'
+            festivals_text += next_line + await translate(language_code, festivals_name)
 
     if not festivals_text == '':
         festivals_text = f'\n{event_icon} *' + await translate(language_code, 'Events', False) + ':*' + festivals_text  # 🎉
-        event_text += festivals_text
+        event_text += festivals_text + '\n'
+
+    vyasapuji = ''
+    for i in result_gurus:
+        if i[2] == masa_name and i[3] == tithi_index:
+            vyasapuji += '\n' + i[0]
+
+    if not vyasapuji == '':
+        vyasapuja_title = await translate(language_code, 'Vyasa-puja', True)
+        vyasapuji = '\n🦚 ' + vyasapuja_title + vyasapuji
+
+    event_text += vyasapuji
 
     # TODO сделать форматирование даты и времени в соответствии с кодом языка
     sun_rise = datetime.datetime.strptime(sunrise_time, '%Y-%m-%d %H:%M:%S')
@@ -550,7 +604,7 @@ async def display_calendar(id_user, year, month, day):
     #        + f'\n{moon_icon} *Лунный календарь\:* `Лунный день\: {tithi_index}\. \n' \
     #        + f'Тиртхи (название дня)\: {tithi_name}\.\n' \
     #        + f'Накшатра: {naksatra_name}\. Йога: {yoga}\.\n' \
-    #        + f'Год \({gaurabda}\)\: {gyear}\. Маса (лунный месяц)\: {name}\.`\n' \
+    #        + f'Год \({gaurabda}\)\: {gyear}\. Маса (лунный месяц)\: {masa_name}\.`\n' \
     #        + f'\n🌙 *Луна\:* `восход\: {moon_rise[11:16]}\. Закат\: {moon_set[11:16]}\.`\n'\
     #        + f'\n☀️ *Солнце\:* `Восход\: {sunrise_time[11:16]}\. Закат\: {sunset_time[11:16]}\.\n'\
     #        + f'брахма мухурта\: {arunodaya_time[11:16]}\. Полдень\: {noon_time[11:16]}\.\n' \
@@ -562,7 +616,7 @@ async def display_calendar(id_user, year, month, day):
                                 moon_icon, tithi_index,
                                 tithi_name,
                                 naksatra_name, yoga,
-                                gaurabda, gyear, name,
+                                gaurabda, gyear, masa_name,
                                 moon_rise, moon_set,
                                 sunrise_time, noon_time, sunset_time,
                                 arunodaya_time,
@@ -606,7 +660,7 @@ async def command_start(message: Message):
         today = datetime.datetime.today()
         text, keyboard = await display_calendar(id_user, today.year, today.month, today.day)
 
-    await message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard)
+    await message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard, disable_web_page_preview=True)
 
 
 @dp.message_handler(content_types=['location'])
@@ -667,12 +721,12 @@ async def handle_location(message: Message):
     result = await translate(language_code, 'location confirmation', False)
     text = result.format(country, city, uts_text)
 
-    await message.answer(text, parse_mode='MarkdownV2', reply_markup=ReplyKeyboardRemove())
+    await message.answer(text, parse_mode='MarkdownV2', reply_markup=ReplyKeyboardRemove(), disable_web_page_preview=True)
 
     today = datetime.datetime.today()
     text, inline_kb = await display_calendar(id_user, today.year, today.month, today.day)
 
-    await message.answer(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+    await message.answer(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
 
 
 @dp.callback_query_handler(lambda x: x.data and x.data.startswith('calendar '))
@@ -687,7 +741,7 @@ async def menu_back(callback: CallbackQuery):
     text, inline_kb = await display_calendar(id_user, year, month, day)
 
     try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
     except:
         pass
 
@@ -698,7 +752,7 @@ async def menu_settings_help(callback: CallbackQuery):
     text, inline_kb = await menu_settings(callback)
 
     try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
     except:
         pass
 
@@ -787,12 +841,12 @@ async def menu_settings_help(callback: CallbackQuery):
     elif command == 'change_location':
         text, keyboard = await menu_get_location(callback)
         await callback.message.delete()
-        await callback.message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard)
+        await callback.message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard, disable_web_page_preview=True)
 
         return
 
     try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
     except:
         pass
 
@@ -810,7 +864,7 @@ async def menu_settings_help(callback: CallbackQuery):
 
     text, inline_kb = await menu_settings(callback)
     try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb)
+        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
     except:
         pass
 
