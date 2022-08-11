@@ -15,6 +15,9 @@ from settings import TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME
 import sqlite3
 
 import os
+import asyncio
+import aioschedule
+from sys import platform
 import datetime
 import time
 from calendar import monthrange
@@ -40,7 +43,7 @@ async def on_startup(_):
         'CREATE TABLE IF NOT EXISTS users(id_user INTEGER, first_name TEXT, last_name TEXT, '
             'username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, '
             'address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, '
-            'caturmasya_system TEXT, notification_time TEXT, only_fasting BLOB)')
+            'caturmasya_system TEXT, notification_time TEXT, reminder INTEGER, last_message_id INTEGER)')
     connect.execute(
         'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
@@ -60,6 +63,8 @@ async def on_startup(_):
     connect.execute('CREATE TABLE IF NOT EXISTS gurus(name TEXT, date TEXT, masa_name TEXT, tithi_index INTEGER)')
 
     connect.commit()
+
+    asyncio.create_task(scheduler())
 
 
 def shielding(text):
@@ -179,44 +184,35 @@ async def menu_settings(callback):
     uts_summer = result[12]
     caturmasya_system = result[13]
     notification_time = result[14]
-    only_fasting = result[15]
+    reminder = result[15]
 
-    text = 'qwe'
+    text = '⚙`                    \.\.\.`'
 
     caturmasya_title = await translate(language_code, 'Caturmasya')
     caturmasya_value = await translate(language_code, caturmasya_system)
-    only_fasting_text = await translate(language_code, 'only_fasting_' + str(only_fasting))
+    reminder_text = await translate(language_code, 'reminder_' + str(reminder))
     notification_time_text = await translate(language_code, 'Notification Time')
     change_location = await translate(language_code, 'Change location')
 
     inline_kb = InlineKeyboardMarkup(row_width=1)
     inline_kb.add(InlineKeyboardButton(text='<<', callback_data='calendar ' + cb_back_to_calendar))
-    inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code us ' + cb_back_to_calendar),
-                  InlineKeyboardButton(text='🇧🇬', callback_data='settings_answer language_code ru ' + cb_back_to_calendar),
-                  InlineKeyboardButton(text='🇺🇦', callback_data='settings_answer language_code ua ' + cb_back_to_calendar))
+    inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code us ' + cb_back_to_calendar)
+                  , InlineKeyboardButton(text='🇷🇺', callback_data='settings_answer language_code ru ' + cb_back_to_calendar)
+                  # , InlineKeyboardButton(text='🇺🇦', callback_data='settings_answer language_code ua ' + cb_back_to_calendar)
+                  )
     inline_kb.add(InlineKeyboardButton(text=caturmasya_title + ': ' + caturmasya_value, callback_data='settings caturmasya_system ' + cb_back_to_calendar))
     inline_kb.add(InlineKeyboardButton(text=notification_time_text + ': ' + notification_time, callback_data='settings notification_time ' + cb_back_to_calendar))
-    inline_kb.add(InlineKeyboardButton(text=only_fasting_text, callback_data='settings only_fasting ' + cb_back_to_calendar))
+    inline_kb.add(InlineKeyboardButton(text=reminder_text, callback_data='settings reminder ' + cb_back_to_calendar))
     inline_kb.add(InlineKeyboardButton(text=change_location, callback_data='settings change_location ' + cb_back_to_calendar))
 
     return text, inline_kb
 
 
-async def fill_calendar(id_user, latitude, longitude, uts, year, month):
+async def fill_calendar(id_user, latitude, longitude, uts, year):
     cursor.execute(f'SELECT language_code FROM users WHERE id_user = {id_user}')
     result = cursor.fetchone()
     language_code = result[0]
 
-    # 1
-    # lt = str(uts // 1) + 'E' + str(int(uts % 1 * 10)) + '0' # часовой пояс в формате 3E00
-    # ty = year
-    # tm = month
-    # td = 1
-    # tc = monthrange(ty, tm)[1] #  количество дней в месяце заполнения
-    # start_date = datetime.datetime.strptime(f'{ty}-{tm}-{td}', '%Y-%m-%d')
-    # end_date = start_date + datetime.timedelta(days=tc-1)
-
-    # 2
     start_date = datetime.datetime.strptime(f'{year}-{1}-{1}', '%Y-%m-%d')
     end_date = datetime.datetime.strptime(f'{year}-{12}-{31}', '%Y-%m-%d')
 
@@ -224,158 +220,183 @@ async def fill_calendar(id_user, latitude, longitude, uts, year, month):
     ty = year
     tm = 1
     td = 1
-    tc = (end_date - start_date).days + 1
-
+    tc = (end_date - start_date).days
     dst = '3x0x5x0x11x0x1x0' #'0x0x0x0x0x0x0x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
 
-    # gcal_cgi.exe "q=calendar&lc=Sevastopol&la=44.616604&lo=33.525369&ty=2019&tm=1&td=1&tc=4018&lt=3E00&dst=0x0x0x0x0x0x0x0" > name_file.xml
-    file_name = rf'{str(round(time.time() * 1000))}' + '.xml'
-    cmd = fr'gcal\gcal_cgi.exe "q=calendar&la={latitude}&lo={longitude}&lt={lt}'\
-          fr'&ty={ty}&tm={tm}&td={td}&tc={tc}&dst={dst}" > {file_name}'
-    os.system(cmd)
+    files = []
+    if platform == "linux" or platform == "linux2":
+        start_date_linux = start_date
+        for i in [100, 100, 100, tc-300]:
+            end_date_linux = start_date_linux + datetime.timedelta(days=i)
+            ty = start_date_linux.year
+            tm = start_date_linux.month
+            td = start_date_linux.day
+            tc = i
+            if tc < 100:
+                tc += 1
+            file_name = rf'{str(round(time.time() * 1000))}' + '.xml'
+            cmd = fr'./gcal/lin/gcal-cgi "q=calendar&la={latitude}&lo={longitude}&lt={lt}' \
+                  fr'&ty={ty}&tm={tm}&td={td}&tc={tc}&dst={dst}" > {file_name}'
+            os.system(cmd)
+            files.append((file_name, start_date_linux, end_date_linux))
+            start_date_linux = end_date_linux
 
-    xml_file = open(file_name, "r")
-    xml_content = xml_file.read()
-    xml_file.close()
-    os.remove(file_name)
-    xml_dict = xmltodict.parse(xml_content)
+    elif platform == "win32" or platform == "win64":
+        # gcal_cgi.exe "q=calendar&lc=Sevastopol&la=44.616604&lo=33.525369&ty=2019&tm=1&td=1&tc=4018&lt=3E00&dst=0x0x0x0x0x0x0x0" > name_file.xml
+        tc += 1
+        file_name = rf'{str(round(time.time() * 1000))}' + '.xml'
+        cmd = fr'gcal\win\gcal_cgi.exe "q=calendar&la={latitude}&lo={longitude}&lt={lt}'\
+              fr'&ty={ty}&tm={tm}&td={td}&tc={tc}&dst={dst}" > {file_name}'
+        os.system(cmd)
+        files.append((file_name, start_date, end_date))
 
-    masas = xml_dict['xml']['result']['masa']
+    for i in files:
+        file_name = i[0]
+        start_date = i[1]
+        end_date = i[2]
 
-    calendars = []
-    caturmasya = []
-    festivals = []
+        xml_file = open(file_name, "r")
+        xml_content = xml_file.read()
+        xml_file.close()
+        os.remove(file_name)
+        xml_dict = xmltodict.parse(xml_content)
 
-    for masa in masas:
-        masa_name = await translate(language_code, masa['@name'])
-        gyear = masa['@gyear']
-        gyear_list = gyear.split(' ')
-        masa_gyear = int(gyear_list[1])
+        masas = xml_dict['xml']['result']['masa']
 
-        days = masa['day']
-        if isinstance(days, dict):
-            days = (days,)
+        calendars = []
+        caturmasya = []
+        festivals = []
 
-        for day in days:
-            date = string_to_date(day['@date'])
-            sunrise = day['sunrise']
-            sunrise_time = string_to_date(day['@date'], sunrise['@time'])
-            tithi = sunrise['tithi']
-            naksatra = sunrise['naksatra']
-            yoga = sunrise['yoga']
-            paksa = sunrise['paksa']
+        for masa in masas:
+            masa_name = await translate(language_code, masa['@name'])
+            gyear = masa['@gyear']
+            gyear_list = gyear.split(' ')
+            masa_gyear = int(gyear_list[1])
 
-            arunodaya = day['arunodaya']
-            arunodaya_time = string_to_date(day['@date'], arunodaya['@time'])
+            days = masa['day']
+            if isinstance(days, dict):
+                days = (days,)
 
-            noon_time = string_to_date(day['@date'], day['noon']['@time'])
-            sunset_time = string_to_date(day['@date'], day['sunset']['@time'])
-            moon_rise = string_to_date(day['@date'], day['moon']['@rise'])
-            moon_set = string_to_date(day['@date'], day['moon']['@set'])
+            for day in days:
+                date = string_to_date(day['@date'])
+                sunrise = day['sunrise']
+                sunrise_time = string_to_date(day['@date'], sunrise['@time'])
+                tithi = sunrise['tithi']
+                naksatra = sunrise['naksatra']
+                yoga = sunrise['yoga']
+                paksa = sunrise['paksa']
 
-            parana_from = string_to_date()
-            parana_to = parana_from
-            parana_after = parana_from
-            if 'parana' in day:
-                parana = day['parana']
-                if '@after' in parana:
-                    parana_after = string_to_date(day['@date'], parana['@after'] + ':00')
+                arunodaya = day['arunodaya']
+                arunodaya_time = string_to_date(day['@date'], arunodaya['@time'])
+
+                noon_time = string_to_date(day['@date'], day['noon']['@time'])
+                sunset_time = string_to_date(day['@date'], day['sunset']['@time'])
+                moon_rise = string_to_date(day['@date'], day['moon']['@rise'])
+                moon_set = string_to_date(day['@date'], day['moon']['@set'])
+
+                parana_from = string_to_date()
+                parana_to = parana_from
+                parana_after = parana_from
+                if 'parana' in day:
+                    parana = day['parana']
+                    if '@after' in parana:
+                        parana_after = string_to_date(day['@date'], parana['@after'] + ':00')
+                    else:
+                        parana_from = string_to_date(day['@date'], parana['@from'] + ':00')
+                        parana_to = string_to_date(day['@date'], parana['@to'] + ':00')
+
+                if day['vriddhi']['@sd'] == 'yes':
+                    vriddhi_sd = True
                 else:
-                    parana_from = string_to_date(day['@date'], parana['@from'] + ':00')
-                    parana_to = string_to_date(day['@date'], parana['@to'] + ':00')
+                    vriddhi_sd = False
 
-            if day['vriddhi']['@sd'] == 'yes':
-                vriddhi_sd = True
-            else:
-                vriddhi_sd = False
+                event = 10
+                if 'caturmasya' in day:
+                    caturmasya_list = day['caturmasya']
+                    if isinstance(caturmasya_list, dict):
+                        caturmasya_list = (caturmasya_list, )
+                    for caturmasya_dict in caturmasya_list:
+                        record = (id_user, date, caturmasya_dict['@day'], caturmasya_dict['@month'], caturmasya_dict['@system'])
+                        caturmasya.append(record)
+                        event = 6
 
-            if 'caturmasya' in day:
-                caturmasya_list = day['caturmasya']
-                if isinstance(caturmasya_list, dict):
-                    caturmasya_list = (caturmasya_list, )
-                for caturmasya_dict in caturmasya_list:
-                    record = (id_user, date, caturmasya_dict['@day'], caturmasya_dict['@month'], caturmasya_dict['@system'])
-                    caturmasya.append(record)
+                if 'festival' in day:
+                    festival_list = day['festival']
+                    if isinstance(festival_list, dict):
+                        festival_list = (festival_list, )
+                    for festival_dict in festival_list:
+                        current_event = int(festival_dict['@class'])
+                        if not event == 0:
+                            if current_event == 0:
+                                event = 0
+                            else:
+                                event = min(current_event, event)
+                        record = (id_user, date, festival_dict['@name'], current_event)
+                        festivals.append(record)
 
-            event = 10
-            if 'festival' in day:
-                festival_list = day['festival']
-                if isinstance(festival_list, dict):
-                    festival_list = (festival_list, )
-                for festival_dict in festival_list:
-                    current_event = int(festival_dict['@class'])
-                    if not event == 0:
-                        if current_event == 0:
-                            event = 0
-                        else:
-                            event = min(current_event, event)
-                    record = (id_user, date, festival_dict['@name'], current_event)
-                    festivals.append(record)
+                tithi_name = await translate(language_code, tithi['@name'])
+                naksatra_name = await translate(language_code, naksatra['@name'])
+                yoga_name = await translate(language_code, yoga['@name'])
+                paksa_name = await translate(language_code, paksa['@name'])
+                arunodaya_tithi_name = await translate(language_code, arunodaya['tithi']['@name'])
 
-            tithi_name = await translate(language_code, tithi['@name'])
-            naksatra_name = await translate(language_code, naksatra['@name'])
-            yoga_name = await translate(language_code, yoga['@name'])
-            paksa_name = await translate(language_code, paksa['@name'])
-            arunodaya_tithi_name = await translate(language_code, arunodaya['tithi']['@name'])
+                record = (id_user, masa_name, masa_gyear, date, int(day['@dayweekid']), day['@dayweek'],
+                          sunrise_time, tithi_name, float(tithi['@elapse']), int(tithi['@index']),
+                          naksatra_name, float(naksatra['@elapse']), yoga_name,
+                          paksa['@id'], paksa_name, int(day['dst']['@offset']),
+                          arunodaya_time, arunodaya_tithi_name,
+                          noon_time, sunset_time, moon_rise, moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event)
 
-            record = (id_user, masa_name, masa_gyear, date, int(day['@dayweekid']), day['@dayweek'],
-                      sunrise_time, tithi_name, float(tithi['@elapse']), int(tithi['@index']),
-                      naksatra_name, float(naksatra['@elapse']), yoga_name,
-                      paksa['@id'], paksa_name, int(day['dst']['@offset']),
-                      arunodaya_time, arunodaya_tithi_name,
-                      noon_time, sunset_time, moon_rise, moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event)
+                calendars.append(record)
 
-            calendars.append(record)
+        if len(calendars) > 0 or len(caturmasya) > 0 or len(festivals) > 0:
+            cursor.execute(f'DELETE FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
+            cursor.execute(f'DELETE FROM caturmasya WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
+            cursor.execute(f'DELETE FROM festivals WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
 
-    if len(calendars) > 0 or len(caturmasya) > 0 or len(festivals) > 0:
-        cursor.execute(f'DELETE FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
-        cursor.execute(f'DELETE FROM caturmasya WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
-        cursor.execute(f'DELETE FROM festivals WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}"')
+            if len(calendars) > 0:
+                cursor.executemany(
+                    'INSERT INTO calendars (id_user, masa_name, gyear, date, dayweekid, dayweek, '
+                    'sunrise_time, tithi_name, tithi_elapse, tithi_index, '
+                    'naksatra_name, naksatra_elapse, yoga, paksa_id, '
+                    'paksa_name, dst_offset, arunodaya_time, arunodaya_tithi_name, noon_time, sunset_time, moon_rise, '
+                    'moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', calendars)
 
-        if len(calendars) > 0:
-            cursor.executemany(
-                'INSERT INTO calendars (id_user, masa_name, gyear, date, dayweekid, dayweek, '
-                'sunrise_time, tithi_name, tithi_elapse, tithi_index, '
-                'naksatra_name, naksatra_elapse, yoga, paksa_id, '
-                'paksa_name, dst_offset, arunodaya_time, arunodaya_tithi_name, noon_time, sunset_time, moon_rise, '
-                'moon_set, parana_from, parana_to, parana_after, vriddhi_sd, event) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', calendars)
+            if len(caturmasya) > 0:
+                cursor.executemany('INSERT INTO caturmasya (id_user, date, day, month, system) VALUES (?, ?, ?, ?, ?)', caturmasya)
 
-        if len(caturmasya) > 0:
-            cursor.executemany('INSERT INTO caturmasya (id_user, date, day, month, system) VALUES (?, ?, ?, ?, ?)', caturmasya)
+            if len(festivals) > 0:
+                cursor.executemany('INSERT INTO festivals (id_user, date, name, class) VALUES (?, ?, ?, ?)', festivals)
 
-        if len(festivals) > 0:
-            cursor.executemany('INSERT INTO festivals (id_user, date, name, class) VALUES (?, ?, ?, ?)', festivals)
-
-        connect.commit()
+            connect.commit()
 
 
 async def display_calendar(id_user, year, month, day):
     #🎉
     cursor.execute(f'SELECT * FROM users WHERE id_user = {id_user}')
-    result = cursor.fetchone()
-    language_code = result[4]
-    latitude = result[5]
-    longitude = result[6]
-    address = result[7]
-    country = result[8]
-    area = result[9]
-    city = result[10]
-    uts = result[11]
-    uts_summer = result[12]
-    caturmasya_system = result[13]
+    users_tuple = cursor.fetchone()
+    language_code = users_tuple[4]
+    latitude = users_tuple[5]
+    longitude = users_tuple[6]
+    address = users_tuple[7]
+    country = users_tuple[8]
+    area = users_tuple[9]
+    city = users_tuple[10]
+    uts = users_tuple[11]
+    uts_summer = users_tuple[12]
+    caturmasya_system = users_tuple[13]
 
     selected_day_time = datetime.datetime(year, month, day)
     selected_day = selected_day_time.date()
-    # today_with_time = datetime.datetime.today()
-    # today = today_with_time.combine(today_with_time.date(), today_with_time.min.time())
     today = datetime.datetime.today().date()
 
     month_back = add_months(selected_day, -1)
     month_next = add_months(selected_day, 1)
 
     cb_back = f'calendar {month_back.year} {month_back.month} {1}'
-    cb_today = f'calendar {today.year} {today.month} {today.day}'
+    # cb_today = f'calendar {today.year} {today.month} {today.day}'
+    cb_today = f'calendar now now now'
     cb_next = f'calendar {month_next.year} {month_next.month} {1}'
 
     cb_selected_day = f'{selected_day.year} {selected_day.month} {selected_day.day}'
@@ -396,20 +417,20 @@ async def display_calendar(id_user, year, month, day):
 
     cursor.execute(f'SELECT * FROM gurus WHERE NOT date is null')
     result = cursor.fetchall()
-    result_gurus = []
+    gurus_list = []
     for i in result:
         guru_name = await translate(language_code, i[0])
         guru_date = datetime.datetime.strptime(i[1], '%Y-%m-%d %H:%M:%S')
         guru_masa_name = await translate(language_code, i[2])
         guru_tithi_index = int(i[3])
-        result_gurus.append((guru_name, guru_date, guru_masa_name, guru_tithi_index))
+        gurus_list.append((guru_name, guru_date, guru_masa_name, guru_tithi_index))
 
     requisites = 'date, event, masa_name, tithi_index'
     cursor.execute(f'SELECT {requisites} FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
     result = cursor.fetchall()
 
     if len(result) == 0:
-        await fill_calendar(id_user, latitude, longitude, uts, year, month)
+        await fill_calendar(id_user, latitude, longitude, uts, year)
         cursor.execute(f'SELECT {requisites} FROM calendars WHERE id_user = {id_user} AND date BETWEEN "{start_date}" AND "{end_date}" ')
         result = cursor.fetchall()
 
@@ -437,7 +458,7 @@ async def display_calendar(id_user, year, month, day):
         if event_icon == '':
             masa_name = i[2]
             tithi_index = i[3]
-            for ii in result_gurus:
+            for ii in gurus_list:
                 if ii[2] == masa_name and ii[3] == tithi_index:
                     event_icon = '❕'
 
@@ -547,7 +568,7 @@ async def display_calendar(id_user, year, month, day):
         if event == -1 and tithi_index in (11, 12, 26, 27):
             event_icon = ' 📿 '
 
-        cursor.execute(f'SELECT name, class FROM festivals WHERE id_user = {id_user} AND date = "{selected_day_time}"')
+        cursor.execute(f'SELECT name, CASE WHEN class = 0 THEN -2 ELSE class END As class FROM festivals WHERE id_user = {id_user} AND date = "{selected_day_time}"  ORDER BY class')
         result_festival = cursor.fetchall()
 
         for festival in result_festival:
@@ -563,7 +584,7 @@ async def display_calendar(id_user, year, month, day):
         event_text += festivals_text + '\n'
 
     vyasapuji = ''
-    for i in result_gurus:
+    for i in gurus_list:
         if i[2] == masa_name and i[3] == tithi_index:
             vyasapuji += '\n' + i[0]
 
@@ -625,6 +646,70 @@ async def display_calendar(id_user, year, month, day):
     return text, inline_kb
 
 
+async def message_edit_text(text, inline_kb, callback=None, id_user = 0):
+    if callback is None:
+        if id_user == 0:
+            return
+
+        cursor.execute(f'SELECT last_message_id FROM users WHERE id_user = {id_user}')
+        last_message_id = cursor.fetchone()[0]
+        await bot.edit_message_text(text,
+                                    chat_id=id_user,
+                                    message_id=last_message_id,
+                                    parse_mode='MarkdownV2',
+                                    reply_markup=inline_kb,
+                                    disable_web_page_preview=True)
+
+    else:
+        await callback.answer()
+        if id_user == 0:
+            if callback is not None:
+                id_user = callback.message.chat.id
+
+        try:
+            msg = await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
+            cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id} WHERE id_user = {id_user}')
+            connect.commit()
+        except:
+            pass
+
+
+async def scheduler():
+    aioschedule.every().minute.do(run_reminder)
+    while True:
+        await aioschedule.run_pending()
+        await asyncio.sleep(1)
+
+
+async def run_reminder():
+    cursor.execute(f'''SELECT
+                        users.id_user, users.last_message_id,
+                        datetime("now", users.uts || " hour", "start of day", "1 day") AS user_date,
+                        calendars.parana_from, calendars.parana_to, calendars.parana_after,
+                        strftime("%Y-%m-%d %H:%M:00", datetime("now", users.uts || " hour")) AS parana_date
+                    FROM users LEFT JOIN calendars ON users.id_user = calendars.id_user 
+                    WHERE users.reminder > 0 
+                        AND calendars.event < CASE WHEN users.reminder = 2 THEN 10 ELSE 1 END 
+                        AND (strftime("%H:%M", time("now", users.uts || " hour")) = strftime("%H:%M", time(users.notification_time))
+                            AND calendars.date = user_date 
+                            OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_from) = parana_date 
+                            OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_after) = parana_date)''')
+
+    result_tuple = cursor.fetchall()
+    for i in result_tuple:
+        id_user = i[0]
+        last_message_id = i[1]
+        user_date = i[2]
+        date = datetime.datetime.strptime(user_date, '%Y-%m-%d %H:%M:%S')
+
+        text, inline_kb = await display_calendar(id_user, date.year, date.month, date.day)
+        await bot.delete_message(chat_id=id_user, message_id=last_message_id)
+        msg = await bot.send_message(text=text, chat_id=id_user, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
+
+        cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id} WHERE id_user = {id_user}')
+        connect.commit()
+
+
 @dp.message_handler(commands=['start'])
 async def command_start(message: Message):
     id_user = message.from_user.id
@@ -643,8 +728,8 @@ async def command_start(message: Message):
     if result is None:
         new_user = True
         cursor.execute(
-            'INSERT INTO users (id_user, first_name, last_name, username, language_code, latitude, longitude, address, country, area, city, uts, uts_summer, caturmasya_system, notification_time, only_fasting) '
-            f'VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 0, 0, "", "", "", "", 0, 0, "PURNIMA", "18:00", True)')
+            'INSERT INTO users (id_user, first_name, last_name, username, language_code, latitude, longitude, address, country, area, city, uts, uts_summer, caturmasya_system, notification_time, reminder, last_message_id) '
+            f'VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 0, 0, "", "", "", "", 0, 0, "PURNIMA", "18:00", 1, 0)')
     else:
         new_user = result[5] == 0
         cursor.execute(f'UPDATE users SET first_name = "{first_name}", last_name = "{last_name}", '
@@ -660,7 +745,9 @@ async def command_start(message: Message):
         today = datetime.datetime.today()
         text, keyboard = await display_calendar(id_user, today.year, today.month, today.day)
 
-    await message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard, disable_web_page_preview=True)
+    msg = await message.answer(text, parse_mode='MarkdownV2', reply_markup=keyboard, disable_web_page_preview=True)
+    cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id} WHERE id_user = {id_user}')
+    connect.commit()
 
 
 @dp.message_handler(content_types=['location'])
@@ -734,27 +821,29 @@ async def menu_back(callback: CallbackQuery):
     id_user = callback.from_user.id
 
     list_str = callback.data.split()
-    year = int(list_str[1])
-    month = int(list_str[2])
-    day = int(list_str[3])
+    year = list_str[1]
+    month = list_str[2]
+    day = list_str[3]
+
+    if year == 'now':
+        today = datetime.datetime.today().date()
+        year = today.year
+        month = today.month
+        day = today.day
+    else:
+        year = int(year)
+        month = int(month)
+        day = int(day)
 
     text, inline_kb = await display_calendar(id_user, year, month, day)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
-    except:
-        pass
+    await message_edit_text(text, inline_kb, callback)
 
 
 @dp.callback_query_handler(lambda x: x.data and x.data.startswith('all_settings '))
 async def menu_settings_help(callback: CallbackQuery):
 
     text, inline_kb = await menu_settings(callback)
-
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
-    except:
-        pass
+    await message_edit_text(text, inline_kb, callback)
 
 
 @dp.callback_query_handler(lambda x: x.data and x.data.startswith('settings '))
@@ -769,6 +858,7 @@ async def menu_settings_help(callback: CallbackQuery):
     language_code = callback.from_user.language_code
     cb_date = f'{year} {month} {day}'
     inline_kb = InlineKeyboardMarkup(row_width=1)
+    text = ''
 
     if command == 'caturmasya_system':
         # text = await translate(language_code, 'Caturmasya') \
@@ -824,16 +914,18 @@ async def menu_settings_help(callback: CallbackQuery):
         #
         # text, inline_kb = await menu_settings(callback)
 
-    elif command == 'only_fasting':
-        cursor.execute(f'SELECT only_fasting FROM users WHERE id_user = {id_user}')
+    elif command == 'reminder':
+        cursor.execute(f'SELECT reminder FROM users WHERE id_user = {id_user}')
         result = cursor.fetchone()
-        only_fasting = result[0]
-        if only_fasting:
-            only_fasting = False
+        reminder = result[0]
+        if reminder == 0:
+            reminder = 1
+        elif reminder == 1:
+            reminder = 2
         else:
-            only_fasting = True
+            reminder = 0
 
-        cursor.execute(f'UPDATE users SET only_fasting = {only_fasting} WHERE id_user = {id_user}')
+        cursor.execute(f'UPDATE users SET reminder = {reminder} WHERE id_user = {id_user}')
         connect.commit()
 
         text, inline_kb = await menu_settings(callback)
@@ -845,10 +937,7 @@ async def menu_settings_help(callback: CallbackQuery):
 
         return
 
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
-    except:
-        pass
+    await message_edit_text(text, inline_kb, callback)
 
 
 @dp.callback_query_handler(lambda x: x.data and x.data.startswith('settings_answer '))
@@ -863,10 +952,7 @@ async def menu_settings_help(callback: CallbackQuery):
     connect.commit()
 
     text, inline_kb = await menu_settings(callback)
-    try:
-        await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
-    except:
-        pass
+    await message_edit_text(text, inline_kb, callback)
 
 
 @dp.message_handler(state=StatesInput.name)
