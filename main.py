@@ -568,16 +568,29 @@ async def display_calendar(id_user, year, month, day):
         if event == -1 and tithi_index in (11, 12, 26, 27):
             event_icon = ' 📿 '
 
-        cursor.execute(f'SELECT name, CASE WHEN class = 0 THEN -2 ELSE class END As class FROM festivals WHERE id_user = {id_user} AND date = "{selected_day_time}"  ORDER BY class')
+        # cursor.execute(f'SELECT name, CASE WHEN class = 0 THEN -2 ELSE class END As class FROM festivals WHERE id_user = {id_user} AND date = "{selected_day_time}"  ORDER BY class')
+        cursor.execute(f'SELECT name, class FROM festivals WHERE id_user = {id_user} AND date = "{selected_day_time}"')
         result_festival = cursor.fetchall()
 
         for festival in result_festival:
-            festivals_name = festival[0]
-            if festivals_name[0] == '(':
+            festival_name = festival[0]
+            festival_class = festival[1]
+            festival_icon = '' # '🎗'
+
+            if festival_name[0] == '(':
                 next_line = ' '
             else:
                 next_line = '\n'
-            festivals_text += next_line + await translate(language_code, festivals_name)
+                # if festival_class == 0:
+                #     festival_icon = '️‼️'
+                # elif festival_class == -1:
+                #     festival_icon = '❗'
+                # elif festival_class == 10:
+                #     pass
+                # else:
+                #     festival_icon = '❕'
+
+            festivals_text += next_line + festival_icon + await translate(language_code, festival_name)
 
     if not festivals_text == '':
         festivals_text = f'\n{event_icon} *' + await translate(language_code, 'Events', False) + ':*' + festivals_text  # 🎉
