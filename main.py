@@ -44,7 +44,7 @@ async def on_startup(_):
             'username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, '
             'address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, '
             'caturmasya_system TEXT, notification_time TEXT, reminder INTEGER, '
-            'last_message_id INTEGER, last_message_date TEXT)')
+            'last_message_id INTEGER, last_message_date TEXT, last_notification_date TEXT)')
     connect.execute(
         'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
@@ -705,8 +705,9 @@ async def run_reminder():
                             strftime("%Y-%m-%d %H:%M:00", datetime("now", users.uts || " hour")) AS parana_date
                         FROM users LEFT JOIN calendars ON users.id_user = calendars.id_user 
                         WHERE users.reminder > 0 
-                            AND calendars.event < CASE WHEN users.reminder = 2 THEN 10 ELSE 1 END 
-                            AND (strftime("%H:%M", time("now", users.uts || " hour")) = strftime("%H:%M", time(users.notification_time))
+                            AND calendars.event < CASE WHEN users.reminder = 2 THEN 10 ELSE 1 END
+                            AND date("now", users.uts || " hour") || " " || time(users.notification_time) >= users.last_notification_date 
+                            AND (strftime("%H:%M", time("now", users.uts || " hour")) >= strftime("%H:%M", time(users.notification_time))
                                 AND calendars.date = user_date 
                                 OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_from) = parana_date 
                                 OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_after) = parana_date)''')
@@ -719,16 +720,22 @@ async def run_reminder():
         date = datetime.datetime.strptime(user_date, '%Y-%m-%d %H:%M:%S')
 
         text, inline_kb = await display_calendar(id_user, date.year, date.month, date.day)
-        await bot.delete_message(chat_id=id_user, message_id=last_message_id)
+        if last_message_id:
+            try:
+                await bot.delete_message(chat_id=id_user, message_id=last_message_id)
+            except:
+                pass
         msg = await bot.send_message(text=text, chat_id=id_user, parse_mode='MarkdownV2', reply_markup=inline_kb,
                                      disable_web_page_preview=True)
 
-        cursor.execute(
-            f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
+        cursor.execute(f'''UPDATE users SET last_message_id = {msg.message_id}, 
+                        last_message_date = datetime("now", uts || " hour"), 
+                        last_notification_date = datetime("now", uts || " hour") WHERE id_user = {id_user}''')
         connect.commit()
 
-    cursor.execute('SELECT id_user, last_message_id, strftime("%Y-%m-%d 00:00:00", datetime("now", users.uts || " hour")) AS user_date FROM users '
-                   'WHERE strftime("%Y-%m-%d 00:00:00", last_message_date) < user_date''')
+    cursor.execute('''SELECT id_user, last_message_id, strftime("%Y-%m-%d 00:00:00", 
+                    datetime("now", users.uts || " hour")) AS user_date FROM users 
+                    WHERE strftime("%Y-%m-%d 00:00:00", last_message_date) < user_date''')
     result_tuple = cursor.fetchall()
     for i in result_tuple:
         id_user = i[0]
@@ -762,10 +769,11 @@ async def command_start(message: Message):
         new_user = True
         cursor.execute(
             f'''INSERT INTO users (id_user, first_name, last_name, username, language_code, 
-            latitude, longitude, address, country, area, city, 
-            uts, uts_summer, caturmasya_system, notification_time, reminder, last_message_id, last_message_date) 
+            latitude, longitude, address, country, area, city, uts, uts_summer, caturmasya_system, 
+            notification_time, reminder, last_message_id, last_message_date, last_notification_date) 
             VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 
-            0, 0, "", "", "", "", 0, 0, "PURNIMA", "18:00", 1, 0, datetime("now", uts || " hour"))''')
+            0, 0, "", "", "", "", 0, 0, "PURNIMA", "18:00", 1, 0, 
+            datetime("now", uts || " hour"), datetime("now", uts || " hour"))''')
     else:
         new_user = result[5] == 0
         cursor.execute(f'UPDATE users SET first_name = "{first_name}", last_name = "{last_name}", '
