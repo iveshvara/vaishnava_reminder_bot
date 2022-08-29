@@ -40,25 +40,26 @@ cursor = connect.cursor()
 
 async def on_startup(_):
     connect.execute(
-        'CREATE TABLE IF NOT EXISTS users(id_user INTEGER, first_name TEXT, last_name TEXT, '
-            'username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, '
-            'address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, '
-            'caturmasya_system TEXT, notification_time TEXT, reminder INTEGER, '
-            'last_message_id INTEGER, last_message_date TEXT, last_notification_date TEXT)')
+        '''CREATE TABLE IF NOT EXISTS users(id_user INTEGER, first_name TEXT, last_name TEXT, 
+            username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, 
+            address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, 
+            caturmasya_system TEXT, notification_time TEXT, reminder INTEGER, 
+            last_message_id INTEGER, last_message_date TEXT, last_notification_date TEXT, 
+            last_notification_parana_date TEXT)''')
     connect.execute(
         'CREATE TABLE IF NOT EXISTS translations(language_code TEXT, mark TEXT, text TEXT, link TEXT)')
     connect.execute(
-        'CREATE TABLE IF NOT EXISTS calendars(id_user INTEGER, masa_name TEXT, gyear INTEGER, '
-            'date TEXT, dayweekid INTEGER, dayweek TEXT, '
-            'sunrise_time TEXT, tithi_name TEXT, tithi_elapse NUMERIC, tithi_index INTEGER, '
-            'naksatra_name TEXT, naksatra_elapse NUMERIC, '
-            'yoga TEXT, paksa_id TEXT, paksa_name TEXT, '
-            'dst_offset INTEGER, '
-            'arunodaya_time TEXT, arunodaya_tithi_name TEXT, '
-            'noon_time TEXT, sunset_time TEXT, '
-            'moon_rise TEXT, moon_set TEXT, '
-            'parana_from TEXT, parana_to TEXT, parana_after TEXT, '
-            'vriddhi_sd BLOB, event INTEGER)')
+        '''CREATE TABLE IF NOT EXISTS calendars(id_user INTEGER, masa_name TEXT, gyear INTEGER, 
+            date TEXT, dayweekid INTEGER, dayweek TEXT, 
+            sunrise_time TEXT, tithi_name TEXT, tithi_elapse NUMERIC, tithi_index INTEGER, 
+            naksatra_name TEXT, naksatra_elapse NUMERIC, 
+            yoga TEXT, paksa_id TEXT, paksa_name TEXT, 
+            dst_offset INTEGER, 
+            arunodaya_time TEXT, arunodaya_tithi_name TEXT, 
+            noon_time TEXT, sunset_time TEXT, 
+            moon_rise TEXT, moon_set TEXT, 
+            parana_from TEXT, parana_to TEXT, parana_after TEXT, 
+            vriddhi_sd BLOB, event INTEGER)''')
     connect.execute('CREATE TABLE IF NOT EXISTS festivals(id_user INTEGER, name TEXT, class INTEGER)')
     connect.execute('CREATE TABLE IF NOT EXISTS caturmasya(id_user INTEGER, day TEXT, month INTEGER, system TEXT)')
     connect.execute('CREATE TABLE IF NOT EXISTS gurus(name TEXT, date TEXT, masa_name TEXT, tithi_index INTEGER)')
@@ -222,7 +223,7 @@ async def fill_calendar(id_user, latitude, longitude, uts, year):
     tm = 1
     td = 1
     tc = (end_date - start_date).days
-    dst = '3x0x5x0x11x0x1x0' #'0x0x0x0x0x0x0x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
+    dst = '0x0x0x0x0x0x0x0' #'3x0x5x0x11x0x1x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
 
     files = []
     if platform == "linux" or platform == "linux2":
@@ -698,26 +699,55 @@ async def scheduler():
 
 
 async def run_reminder():
-    cursor.execute(f'''SELECT
-                            users.id_user, users.last_message_id,
-                            datetime("now", users.uts || " hour", "start of day", "1 day") AS user_date,
-                            calendars.parana_from, calendars.parana_to, calendars.parana_after,
-                            strftime("%Y-%m-%d %H:%M:00", datetime("now", users.uts || " hour")) AS parana_date
-                        FROM users LEFT JOIN calendars ON users.id_user = calendars.id_user 
-                        WHERE users.reminder > 0 
-                            AND calendars.event < CASE WHEN users.reminder = 2 THEN 10 ELSE 1 END
-                            AND date("now", users.uts || " hour") || " " || time(users.notification_time) >= users.last_notification_date 
-                            AND (strftime("%H:%M", time("now", users.uts || " hour")) >= strftime("%H:%M", time(users.notification_time))
-                                AND calendars.date = user_date 
-                                OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_from) = parana_date 
-                                OR strftime("%Y-%m-%d %H:%M:00", calendars.parana_after) = parana_date)''')
-
+    cursor.execute(
+        '''SELECT
+            users.id_user,
+            users.last_message_id,
+            CASE
+                WHEN
+                    NOT calendars.parana_from = "0001-01-01 00:00:00" OR NOT calendars.parana_after = "0001-01-01 00:00:00"
+                THEN
+                    DateTime("now", users.uts || " hour", "start of day")
+                ELSE
+                    DateTime("now", users.uts || " hour", "start of day", "1 day")
+            END AS user_date,
+            DateTime("now", users.uts || " hour", "start of day", "1 day") AS user_date_tomorrow,
+            NOT calendars.parana_from = "0001-01-01 00:00:00" OR
+            NOT calendars.parana_after = "0001-01-01 00:00:00" AS its_parana,
+            Date("now", users.uts || " hour") AS today_date,
+            StrfTime("%H:%M:00", Time("now", users.uts || " hour")) AS today_time,
+            Date("now", users.uts || " hour"),
+            Date(users.last_notification_parana_date)
+        FROM
+            users
+            LEFT JOIN calendars ON users.id_user = calendars.id_user
+        WHERE
+            users.reminder > 0
+            AND ((StrfTime("%H:%M", Time("now", users.uts || " hour")) >= StrfTime("%H:%M", Time(users.notification_time))
+                    AND calendars.date = user_date_tomorrow
+                    AND calendars.event < CASE
+                        WHEN
+                            users.reminder = 2
+                        THEN
+                            10
+                        ELSE
+                            1
+                    END
+                    AND Date("now", users.uts || " hour") || " " || Time(users.notification_time) >=
+                    users.last_notification_date)
+                OR ((Date(calendars.parana_from) = today_date
+                        AND StrfTime("%H:%M:00", calendars.parana_from) <= today_time)
+                    OR (Date(calendars.parana_after) = today_date
+                        AND StrfTime("%H:%M:00", calendars.parana_after) <= today_time))
+                    AND Date("now", users.uts || " hour") > Date(users.last_notification_parana_date))'''
+    )
     result_tuple = cursor.fetchall()
     for i in result_tuple:
         id_user = i[0]
         last_message_id = i[1]
         user_date = i[2]
         date = datetime.datetime.strptime(user_date, '%Y-%m-%d %H:%M:%S')
+        its_parana = i[3]
 
         text, inline_kb = await display_calendar(id_user, date.year, date.month, date.day)
         if last_message_id:
@@ -729,9 +759,13 @@ async def run_reminder():
                                      disable_web_page_preview=True)
 
         cursor.execute(f'''UPDATE users SET last_message_id = {msg.message_id}, 
-                        last_message_date = datetime("now", uts || " hour"), 
-                        last_notification_date = datetime("now", uts || " hour") WHERE id_user = {id_user}''')
+                                last_message_date = datetime("now", uts || " hour"), 
+                                last_notification_date = datetime("now", uts || " hour") WHERE id_user = {id_user}''')
         connect.commit()
+
+        if its_parana:
+            cursor.execute(f'UPDATE users SET last_notification_parana_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
+            connect.commit()
 
     cursor.execute('''SELECT id_user, last_message_id, strftime("%Y-%m-%d 00:00:00", 
                     datetime("now", users.uts || " hour")) AS user_date FROM users 
@@ -773,7 +807,7 @@ async def command_start(message: Message):
             notification_time, reminder, last_message_id, last_message_date, last_notification_date) 
             VALUES ({id_user}, "{first_name}", "{last_name}", "{username}", "{language_code}", 
             0, 0, "", "", "", "", 0, 0, "PURNIMA", "18:00", 1, 0, 
-            datetime("now", uts || " hour"), datetime("now", uts || " hour"))''')
+            datetime("now"), datetime("now"))''')
     else:
         new_user = result[5] == 0
         cursor.execute(f'UPDATE users SET first_name = "{first_name}", last_name = "{last_name}", '
