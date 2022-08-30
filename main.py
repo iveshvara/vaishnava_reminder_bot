@@ -850,13 +850,13 @@ async def handle_location(message: Message):
     components = address_path['Components']
     for i in components:
         if i['kind'] == 'country':
-            country = i['name']
+            country = shielding(i['name'])
         elif i['kind'] == 'province':
-            area = i['name']
+            area = shielding(i['name'])
         elif i['kind'] == 'area':
-            area = i['name']
+            area = shielding(i['name'])
         elif i['kind'] == 'locality' and city == '':
-            city = i['name']
+            city = shielding(i['name'])
 
     cursor.execute(f'UPDATE users SET address = "{address}", country = "{country}", area = "{area}", city = "{city}" WHERE id_user = {id_user}')
     connect.commit()
@@ -874,7 +874,7 @@ async def handle_location(message: Message):
     connect.commit()
 
     # TODO сделать определение текущего UTC
-    uts_text = str(uts)
+    uts_text = str(abs(uts))
     if uts == 0:
         pass
     elif uts > 0:
