@@ -11,7 +11,7 @@ from aiogram.utils.markdown import link
 
 import requests
 from geopy.geocoders import Yandex
-from settings import TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME
+from settings import TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME, ADMIN_ID
 import sqlite3
 
 import os
@@ -20,6 +20,7 @@ import aioschedule
 from sys import platform
 import datetime
 import time
+import pytz
 from calendar import monthrange
 import xmltodict
 
@@ -42,7 +43,7 @@ async def on_startup(_):
     connect.execute(
         '''CREATE TABLE IF NOT EXISTS users(id_user INTEGER, first_name TEXT, last_name TEXT, 
             username TEXT, language_code TEXT, latitude NUMERIC, longitude NUMERIC, 
-            address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, 
+            address TEXT, country TEXT, area TEXT, city TEXT, uts INTEGER, uts_summer INTEGER, timezone TEXT
             caturmasya_system TEXT, notification_time TEXT, reminder INTEGER, 
             last_message_id INTEGER, last_message_date TEXT, last_notification_date TEXT, 
             last_notification_parana_date TEXT)''')
@@ -157,7 +158,7 @@ async def menu_get_location(message):
 
     text = await translate(language_code, 'geolocation')
     send_location_title = await translate(language_code, 'Send a geo location')
-    keyboard = ReplyKeyboardMarkup()
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(KeyboardButton(send_location_title, request_location=True))
 
     return text, keyboard
@@ -184,9 +185,10 @@ async def menu_settings(callback):
     city = result[10]
     uts = result[11]
     uts_summer = result[12]
-    caturmasya_system = result[13]
-    notification_time = result[14]
-    reminder = result[15]
+    timezone = result[13]
+    caturmasya_system = result[14]
+    notification_time = result[15]
+    reminder = result[16]
 
     text = '⚙`                    \.\.\.`'
 
@@ -211,19 +213,38 @@ async def menu_settings(callback):
 
 
 async def fill_calendar(id_user, latitude, longitude, uts, year):
-    cursor.execute(f'SELECT language_code FROM users WHERE id_user = {id_user}')
+    cursor.execute(f'SELECT language_code, timezone, uts, uts_summer FROM users WHERE id_user = {id_user}')
     result = cursor.fetchone()
     language_code = result[0]
+    timezone = result[1]
+    uts = result[2]
+    uts_summer = result[3]
 
     start_date = datetime.datetime.strptime(f'{year}-{1}-{1}', '%Y-%m-%d')
     end_date = datetime.datetime.strptime(f'{year}-{12}-{31}', '%Y-%m-%d')
 
-    lt = str(uts // 1) + 'E' + str(int(uts % 1 * 10)) + '0'  # часовой пояс в формате 3E00
+    #lt = str(uts // 1) + 'E' + str(int(uts % 1 * 10)) + '0'  # часовой пояс в формате 3E00
+    lt = str(uts)
     ty = year
     tm = 1
     td = 1
     tc = (end_date - start_date).days
-    dst = '0x0x0x0x0x0x0x0' #'3x0x5x0x11x0x1x0' # этоти параметры определяюят как будет расчитан переход на летнее и зимнее время.
+
+    if uts == uts_summer:
+        dst = '0x0x0x0x0x0x0x0' #'3x0x5x0x11x0x1x0' # эти параметры определяюят как будет расчитан переход на летнее и зимнее время.
+    else:
+        tz = pytz.timezone(timezone)
+        utcnow = datetime.datetime.utcnow()
+        transition_times = tz._utc_transition_times
+        index = 0
+        for i in transition_times:
+            if i.year == utcnow.year:
+                index = transition_times.index(i)
+                break
+
+        summer_time_on = transition_times[index] #.astimezone(tz).replace(tzinfo=None)
+        summer_time_off = transition_times[index + 1] #.astimezone(tz).replace(tzinfo=None)
+        dst = str(summer_time_on.month) + 'x1x' + str(summer_time_on.day) + 'x1x' + str(summer_time_off.month) + 'x1x' + str(summer_time_off.day) + 'x1'
 
     files = []
     if platform == "linux" or platform == "linux2":
@@ -378,6 +399,8 @@ async def display_calendar(id_user, year, month, day):
     #🎉
     cursor.execute(f'SELECT * FROM users WHERE id_user = {id_user}')
     users_tuple = cursor.fetchone()
+    if users_tuple is None:
+        return
     language_code = users_tuple[4]
     latitude = users_tuple[5]
     longitude = users_tuple[6]
@@ -387,7 +410,8 @@ async def display_calendar(id_user, year, month, day):
     city = users_tuple[10]
     uts = users_tuple[11]
     uts_summer = users_tuple[12]
-    caturmasya_system = users_tuple[13]
+    timezone = users_tuple[13]
+    caturmasya_system = users_tuple[14]
 
     selected_day_time = datetime.datetime(year, month, day)
     selected_day = selected_day_time.date()
@@ -755,13 +779,17 @@ async def run_reminder():
                 await bot.delete_message(chat_id=id_user, message_id=last_message_id)
             except:
                 pass
-        msg = await bot.send_message(text=text, chat_id=id_user, parse_mode='MarkdownV2', reply_markup=inline_kb,
+
+        try:
+            msg = await bot.send_message(text=text, chat_id=id_user, parse_mode='MarkdownV2', reply_markup=inline_kb,
                                      disable_web_page_preview=True)
 
-        cursor.execute(f'''UPDATE users SET last_message_id = {msg.message_id}, 
-                                last_message_date = datetime("now", uts || " hour"), 
-                                last_notification_date = datetime("now", uts || " hour") WHERE id_user = {id_user}''')
-        connect.commit()
+            cursor.execute(f'''UPDATE users SET last_message_id = {msg.message_id}, 
+                                    last_message_date = datetime("now", uts || " hour"), 
+                                    last_notification_date = datetime("now", uts || " hour") WHERE id_user = {id_user}''')
+            connect.commit()
+        except:
+            pass
 
         if its_parana:
             cursor.execute(f'UPDATE users SET last_notification_parana_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
@@ -778,10 +806,13 @@ async def run_reminder():
         date = datetime.datetime.strptime(user_date, '%Y-%m-%d %H:%M:%S')
 
         text, inline_kb = await display_calendar(id_user, date.year, date.month, date.day)
-        msg = await bot.edit_message_text(text=text, chat_id=id_user, message_id=last_message_id,
+        try:
+            msg = await bot.edit_message_text(text=text, chat_id=id_user, message_id=last_message_id,
                 parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
-        cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
-        connect.commit()
+            cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
+            connect.commit()
+        except:
+            pass
 
 
 @dp.message_handler(commands=['start'])
@@ -864,13 +895,15 @@ async def handle_location(message: Message):
     if area in ("Севастополь", "Республика Крым"):
         uts = 3
         uts_summer = 3
+        timezone = 'Europe/Moscow'
     else:
         response_text = requests.get(f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')  ## Make a request
         response = response_text.json()
         uts = response['rawOffset']
         uts_summer = response['dstOffset']
+        timezone = response['timezoneId']
 
-    cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}" WHERE id_user = {id_user}')
+    cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
     connect.commit()
 
     # TODO сделать определение текущего UTC
@@ -1031,6 +1064,81 @@ async def menu_settings_help(callback: CallbackQuery):
 
     text, inline_kb = await menu_settings(callback)
     await message_edit_text(text, inline_kb, callback)
+
+
+@dp.message_handler(commands=['recalculate_all'])
+async def handle_location(message: Message):
+    if not ADMIN_ID == message.from_user.id:
+        return
+
+    cursor.execute(f'''SELECT id_user, latitude, longitude, uts, last_message_id, 
+        strftime("%Y-%m-%d 00:00:00", datetime("now", users.uts || " hour")) AS user_date 
+        FROM users WHERE NOT latitude = 0''')
+    result = cursor.fetchall()
+    for line in result:
+        id_user = line[0]
+        latitude = line[1]
+        longitude = line[2]
+        uts = line[3]
+        last_message_id = line[4]
+        user_date = line[5]
+
+        geolocator = Yandex(api_key=YANDEX_API_KEY)
+        location = geolocator.reverse(f'{latitude}, {longitude}')
+
+        address_path = location.raw['metaDataProperty']['GeocoderMetaData']['Address']
+        address = address_path['formatted']
+        country = ''
+        area = ''
+        city = ''
+        components = address_path['Components']
+        for i in components:
+            if i['kind'] == 'country':
+                country = shielding(i['name'])
+            elif i['kind'] == 'province':
+                area = shielding(i['name'])
+            elif i['kind'] == 'area' and area == '':
+                area = shielding(i['name'])
+            elif i['kind'] == 'locality' and city == '':
+                city = shielding(i['name'])
+
+        if city == '':
+            city = shielding(components[-1]['name'])
+
+        cursor.execute(f'UPDATE users SET address = "{address}", country = "{country}", area = "{area}", city = "{city}" WHERE id_user = {id_user}')
+        connect.commit()
+
+        if area in ("Севастополь", "Республика Крым"):
+            uts = 3
+            uts_summer = 3
+            timezone = 'Europe/Moscow'
+        else:
+            response_text = requests.get(f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')
+            response = response_text.json()
+            uts = response['rawOffset']
+            uts_summer = response['dstOffset']
+            timezone = response['timezoneId']
+
+        cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
+        connect.commit()
+
+        year = datetime.datetime.today().year
+        await fill_calendar(id_user, latitude, longitude, uts, year)
+
+        date = datetime.datetime.strptime(user_date, '%Y-%m-%d %H:%M:%S')
+
+        text, inline_kb = await display_calendar(id_user, date.year, date.month, date.day)
+        try:
+            msg = await bot.edit_message_text(text=text, chat_id=id_user, message_id=last_message_id,
+                                              parse_mode='MarkdownV2', reply_markup=inline_kb,
+                                              disable_web_page_preview=True)
+            cursor.execute(
+                f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
+            connect.commit()
+        except:
+            pass
+
+    print('Done')
 
 
 @dp.message_handler(state=StatesInput.name)
