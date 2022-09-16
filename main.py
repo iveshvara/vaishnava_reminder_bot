@@ -68,6 +68,7 @@ async def on_startup(_):
     connect.commit()
 
     asyncio.create_task(scheduler())
+    print('Ok')
 
 
 def shielding(text):
@@ -894,16 +895,27 @@ async def handle_location(message: Message):
     cursor.execute(f'UPDATE users SET address = "{address}", country = "{country}", area = "{area}", city = "{city}" WHERE id_user = {id_user}')
     connect.commit()
 
+    uts = 0
+    uts_summer = 0
+    timezone = ''
+    error = False
     if area in ("Севастополь", "Республика Крым"):
         uts = 3
         uts_summer = 3
         timezone = 'Europe/Moscow'
     else:
         response_text = requests.get(f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')  ## Make a request
-        response = response_text.json()
-        uts = response['rawOffset']
-        uts_summer = response['dstOffset']
-        timezone = response['timezoneId']
+        if response_text.status_code == 200:
+            response = response_text.json()
+            uts = response['rawOffset']
+            uts_summer = response['dstOffset']
+            timezone = response['timezoneId']
+        else:
+            error = True
+            await bot.send_message(text=response_text.text, id_user=ADMIN_ID)
+
+    if error:
+        return
 
     cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
     connect.commit()
@@ -1075,7 +1087,7 @@ async def handle_location(message: Message):
     cursor.execute(f'''SELECT id_user, latitude, longitude, uts, last_message_id, 
         strftime("%Y-%m-%d 00:00:00", datetime("now", users.uts || " hour")) AS user_date 
         FROM users WHERE NOT latitude = 0
-        --AND id_user = 367715690
+        --AND id_user = 
         ''')
     result = cursor.fetchall()
     for line in result:
@@ -1111,19 +1123,40 @@ async def handle_location(message: Message):
         cursor.execute(f'UPDATE users SET address = "{address}", country = "{country}", area = "{area}", city = "{city}" WHERE id_user = {id_user}')
         connect.commit()
 
+        uts = 0
+        uts_summer = 0
+        timezone = ''
+        error = False
         if area in ("Севастополь", "Республика Крым"):
             uts = 3
             uts_summer = 3
             timezone = 'Europe/Moscow'
         else:
-            response_text = requests.get(f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')
-            response = response_text.json()
-            uts = response['rawOffset']
-            uts_summer = response['dstOffset']
-            timezone = response['timezoneId']
+            response_text = requests.get(
+                f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')  ## Make a request
+            if response_text.status_code == 200:
+                response = response_text.json()
+                uts = response['rawOffset']
+                uts_summer = response['dstOffset']
+                timezone = response['timezoneId']
+            else:
+                error = True
+                await bot.send_message(text=response_text.text, id_user=ADMIN_ID)
+
+        if error:
+            return
 
         cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
         connect.commit()
+
+        uts_text = str(abs(uts))
+        if uts == 0:
+            pass
+        elif uts > 0:
+            uts_text = '\+ ' + uts_text
+        elif uts < 0:
+            uts_text = '\- ' + uts_text
+        uts_text += ' UTC'
 
         year = datetime.datetime.today().year
         await fill_calendar(id_user, latitude, longitude, uts, year)
