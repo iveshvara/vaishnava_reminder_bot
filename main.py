@@ -910,12 +910,20 @@ async def handle_location(message: Message):
             uts = response['rawOffset']
             uts_summer = response['dstOffset']
             timezone = response['timezoneId']
+        elif response_text.text == '{"status": {\n  "message": "invalid timezone Europe/Kiev",\n  "value": 12\n}}'\
+                or response_text.text == '{"status": {\n  "message": "invalid timezone Europe/Kyiv",\n  "value": 12\n}}':
+            uts = 2
+            uts_summer = 2
+            timezone = 'Europe/Kiev'
         else:
             error = True
-            await bot.send_message(text=response_text.text, id_user=ADMIN_ID)
+            await bot.send_message(text=str(id_user) + ': ' + response_text.text, id_user=ADMIN_ID)
 
     if error:
         return
+
+    if timezone == 'Europe/Kyiv':
+        timezone = 'Europe/Kiev'
 
     cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
     connect.commit()
@@ -1132,19 +1140,26 @@ async def handle_location(message: Message):
             uts_summer = 3
             timezone = 'Europe/Moscow'
         else:
-            response_text = requests.get(
-                f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')  ## Make a request
+            response_text = requests.get(f'http://api.geonames.org/timezoneJSON?formatted=true&lat={latitude}&lng={longitude}&username={GEONAMES_USERNAME}')  ## Make a request
             if response_text.status_code == 200:
                 response = response_text.json()
                 uts = response['rawOffset']
                 uts_summer = response['dstOffset']
                 timezone = response['timezoneId']
+            elif response_text.text == '{"status": {\n  "message": "invalid timezone Europe/Kiev",\n  "value": 12\n}}' \
+                    or response_text.text == '{"status": {\n  "message": "invalid timezone Europe/Kyiv",\n  "value": 12\n}}':
+                uts = 2
+                uts_summer = 2
+                timezone = 'Europe/Kiev'
             else:
                 error = True
-                await bot.send_message(text=response_text.text, id_user=ADMIN_ID)
+                await bot.send_message(text=str(id_user) + ': ' + response_text.text, id_user=ADMIN_ID)
 
         if error:
             return
+
+        if timezone == 'Europe/Kyiv':
+            timezone = 'Europe/Kiev'
 
         cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
         connect.commit()
