@@ -92,6 +92,9 @@ def string_to_date(date_text='', time_text=''):
 
 
 async def translate(language_code, mark, need_shielding=True):
+    language_codes = ['ru', 'en']
+    if not language_code in language_codes:
+        language_code = 'en'
     cursor.execute(f'SELECT text, link FROM translations WHERE language_code = "{language_code}" AND mark = "{mark}"')
     result = cursor.fetchone()
     if result is None:
@@ -200,7 +203,7 @@ async def menu_settings(callback):
 
     inline_kb = InlineKeyboardMarkup(row_width=1)
     inline_kb.add(InlineKeyboardButton(text='<<', callback_data='calendar ' + cb_back_to_calendar))
-    inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code us ' + cb_back_to_calendar)
+    inline_kb.row(InlineKeyboardButton(text='🇺🇸', callback_data='settings_answer language_code en ' + cb_back_to_calendar)
                   , InlineKeyboardButton(text='🇷🇺', callback_data='settings_answer language_code ru ' + cb_back_to_calendar)
                   # , InlineKeyboardButton(text='🇺🇦', callback_data='settings_answer language_code ua ' + cb_back_to_calendar)
                   )
@@ -291,7 +294,7 @@ async def fill_calendar(id_user, latitude, longitude, uts, year):
         festivals = []
 
         for masa in masas:
-            masa_name = await translate(language_code, masa['@name'])
+            masa_name = masa['@name']
             gyear = masa['@gyear']
             gyear_list = gyear.split(' ')
             masa_gyear = int(gyear_list[1])
@@ -357,11 +360,11 @@ async def fill_calendar(id_user, latitude, longitude, uts, year):
                         record = (id_user, date, festival_dict['@name'], current_event)
                         festivals.append(record)
 
-                tithi_name = await translate(language_code, tithi['@name'])
-                naksatra_name = await translate(language_code, naksatra['@name'])
-                yoga_name = await translate(language_code, yoga['@name'])
-                paksa_name = await translate(language_code, paksa['@name'])
-                arunodaya_tithi_name = await translate(language_code, arunodaya['tithi']['@name'])
+                tithi_name = tithi['@name']
+                naksatra_name = naksatra['@name']
+                yoga_name = yoga['@name']
+                paksa_name = paksa['@name']
+                arunodaya_tithi_name = arunodaya['tithi']['@name']
 
                 record = (id_user, masa_name, masa_gyear, date, int(day['@dayweekid']), day['@dayweek'],
                           sunrise_time, tithi_name, float(tithi['@elapse']), int(tithi['@index']),
@@ -396,7 +399,6 @@ async def fill_calendar(id_user, latitude, longitude, uts, year):
 
 
 async def display_calendar(id_user, year, month, day):
-    #🎉
     cursor.execute(f'SELECT * FROM users WHERE id_user = {id_user}')
     users_tuple = cursor.fetchone()
     if users_tuple is None:
@@ -421,7 +423,6 @@ async def display_calendar(id_user, year, month, day):
     month_next = add_months(selected_day, 1)
 
     cb_back = f'calendar {month_back.year} {month_back.month} {1}'
-    # cb_today = f'calendar {today.year} {today.month} {today.day}'
     cb_today = f'calendar now now now'
     cb_next = f'calendar {month_next.year} {month_next.month} {1}'
 
@@ -553,23 +554,23 @@ async def display_calendar(id_user, year, month, day):
     cursor.execute(f'SELECT * FROM calendars WHERE id_user = {id_user} AND date = "{selected_day_time}"')
     result = cursor.fetchone()
 
-    masa_name = result[1]
+    masa_name = await translate(language_code, result[1])
     gyear = result[2]
     date = result[3]
     dayweekid = result[4]
     dayweek = result[5]
     sunrise_time = result[6]
-    tithi_name = result[7]
+    tithi_name = await translate(language_code, result[7])
     tithi_elapse = result[8]
     tithi_index = result[9]
-    naksatra_name = result[10]
+    naksatra_name = await translate(language_code, result[10])
     naksatra_elapse = result[11]
-    yoga = result[12]
+    yoga = await translate(language_code, result[12])
     paksa_id = result[13]
-    paksa_name = result[14]
+    paksa_name = await translate(language_code, result[14])
     dst_offset = result[15]
     arunodaya_time = result[16]
-    arunodaya_tithi_name = result[17]
+    arunodaya_tithi_name = await translate(language_code, result[17])
     noon_time = result[18]
     sunset_time = result[19]
     moon_rise = result[20]
@@ -711,7 +712,8 @@ async def message_edit_text(text, inline_kb, callback=None, id_user = 0):
             msg = await callback.message.edit_text(text, parse_mode='MarkdownV2', reply_markup=inline_kb, disable_web_page_preview=True)
             cursor.execute(f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
             connect.commit()
-        except:
+        except Exception as err:
+            print(err)
             pass
 
 
@@ -906,7 +908,6 @@ async def handle_location(message: Message):
     cursor.execute(f'UPDATE users SET uts = "{uts}", uts_summer = "{uts_summer}", timezone = "{timezone}" WHERE id_user = {id_user}')
     connect.commit()
 
-    # TODO сделать определение текущего UTC
     uts_text = str(abs(uts))
     if uts == 0:
         pass
@@ -1073,7 +1074,9 @@ async def handle_location(message: Message):
 
     cursor.execute(f'''SELECT id_user, latitude, longitude, uts, last_message_id, 
         strftime("%Y-%m-%d 00:00:00", datetime("now", users.uts || " hour")) AS user_date 
-        FROM users WHERE NOT latitude = 0''')
+        FROM users WHERE NOT latitude = 0
+        --AND id_user = 367715690
+        ''')
     result = cursor.fetchall()
     for line in result:
         id_user = line[0]
@@ -1135,7 +1138,8 @@ async def handle_location(message: Message):
             cursor.execute(
                 f'UPDATE users SET last_message_id = {msg.message_id}, last_message_date = datetime("now", uts || " hour") WHERE id_user = {id_user}')
             connect.commit()
-        except:
+        except Exception as err:
+            print(err)
             pass
 
     print('Done')
