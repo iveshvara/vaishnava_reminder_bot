@@ -11,7 +11,7 @@ from aiogram.utils.markdown import link
 
 import requests
 from geopy.geocoders import Yandex
-from settings import TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME, ADMIN_ID
+from settings import LOGS_CHANNEL_ID, TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME, ADMIN_ID
 import sqlite3
 
 import os
@@ -69,6 +69,10 @@ async def on_startup(_):
 
     asyncio.create_task(scheduler())
     print('Ok')
+
+
+async def on_shutdown(_):
+    await bot.send_message(text='shutdown', chat_id=LOGS_CHANNEL_ID)
 
 
 def shielding(text):
@@ -1212,4 +1216,4 @@ async def input_end(message: Message, state: FSMContext):
     await message.answer("`" + "result" + "`", parse_mode="MarkdownV2")
 
 
-executor.start_polling(dp, skip_updates=False, on_startup=on_startup)
+executor.start_polling(dp, skip_updates=False, on_startup=on_startup, on_shutdown=on_shutdown)
