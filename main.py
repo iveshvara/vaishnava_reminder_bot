@@ -11,7 +11,7 @@ from aiogram.utils.markdown import link
 
 import requests
 from geopy.geocoders import Yandex
-from settings import LOGS_CHANNEL_ID, TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME, ADMIN_ID
+from settings import THIS_IS_BOT_NAME, LOGS_CHANNEL_ID, TOKEN, YANDEX_API_KEY, GEONAMES_USERNAME, ADMIN_ID
 import sqlite3
 
 import os
@@ -72,7 +72,8 @@ async def on_startup(_):
 
 
 async def on_shutdown(_):
-    await bot.send_message(text='shutdown', chat_id=LOGS_CHANNEL_ID)
+    text = f'@{THIS_IS_BOT_NAME} is shutdown'
+    await bot.send_message(text=text, chat_id=LOGS_CHANNEL_ID)
 
 
 def shielding(text):
